@@ -1,0 +1,16 @@
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+
+# Processed/generated files
+processed/
+
+# OS/editor files
+.DS_Store
+*.log
+*.tmp
+
+# VS Code
+.vscode/

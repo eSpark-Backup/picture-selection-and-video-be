@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart
+aiofiles
+numpy>=1.24
+Pillow>=9.4
+opencv-python-headless>=4.8
+rembg>=2.0.50
+mediapipe==0.10.14
+moviepy>=1.0
