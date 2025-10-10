@@ -36,12 +36,18 @@ def detect_face_center_in_bgr(image_bgr):
 
 
 def resize_image(image, max_size=MAX_RESOLUTION):
-    """Resize image to fit within max_size while maintaining aspect ratio."""
     h, w = image.shape[:2]
     max_w, max_h = max_size
     scale = min(max_w / w, max_h / h, 1.0)
-    new_w, new_h = int(w * scale), int(h * scale)
-    return cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    new_w, new_h = int(w * scale * 0.7), int(h * scale * 0.7)
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+
+    canvas = np.zeros((max_h, max_w, 3), dtype=np.uint8)
+    x_offset = (max_w - new_w) // 2
+    y_offset = (max_h - new_h) // 2
+    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+    return canvas
+
 
 
 def _smooth_progress(progress):
