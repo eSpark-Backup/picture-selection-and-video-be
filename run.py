@@ -1,1 +1,2 @@
-import os; os.system("uvicorn app.main:app --reload")
+import os; 
+os.system("uvicorn app.main:app --reload")
