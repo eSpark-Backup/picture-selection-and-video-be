@@ -36,7 +36,7 @@ def submit_user_form(payload: UserCreateRequest, db: Session = Depends(get_db)):
     return {
         "success": True,
         "message": "User form submitted successfully.",
-        "data": {"user_id": user.id, "email": user.email},
+        "data": {"user_id": user.id, "email": user.email, "phone": user.phone},
     }
 
 
