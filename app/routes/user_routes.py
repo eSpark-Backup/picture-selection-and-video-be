@@ -11,6 +11,10 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from PIL import Image
 import io
+from app.models.reviewer import Reviewer
+from fastapi.security import OAuth2PasswordRequestForm
+from passlib.context import CryptContext
+import jwt, os
 
 router = APIRouter(prefix="/api/v1/users", tags=["Users"])
 
@@ -43,6 +47,26 @@ def submit_user_form(payload: UserCreateRequest, db: Session = Depends(get_db)):
         "message": "User form submitted successfully.",
         "data": {"user_id": user.id, "email": user.email, "phone": user.phone},
     }
+    
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+
+
+@router.post("/reviewer/login")
+def reviewer_login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    reviewer = db.query(Reviewer).filter(Reviewer.email == form_data.username).first()
+    if not reviewer or not pwd_context.verify(form_data.password, reviewer.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    token = jwt.encode({"reviewer_id": reviewer.id, "email": reviewer.email}, SECRET_KEY, algorithm="HS256")
+
+    return {
+        "success": True,
+        "message": "Reviewer logged in successfully.",
+        "access_token": token,
+        "token_type": "bearer",
+    }
+
 
 
 @router.post("/upload-photos/{user_id}")
