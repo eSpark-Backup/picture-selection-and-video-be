@@ -8,7 +8,7 @@ class Photo(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    s3_url = Column(String, nullable=False)
+    photo_url = Column(String, nullable=False)
     filename = Column(String(255), nullable=False)
     status = Column(String(50), default="pending")  # pending | approved | rejected
     created_at = Column(DateTime, default=datetime.utcnow)
