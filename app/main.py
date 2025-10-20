@@ -1,8 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes.bg_remove_routes import router as bg_router
-from app.routes.fill_black_bg_routes import router as fill_black_bg_router
-from app.routes.face_detection_routes import router as face_detection_router
 from app.routes.video_creation_routes import router as video_creation_router
 from app.routes import user_routes
 
@@ -20,8 +17,5 @@ app.add_middleware(
 async def root():
     return {"message": "Backend setup successful!"}
 
-app.include_router(bg_router)
-app.include_router(fill_black_bg_router)
-app.include_router(face_detection_router)
 app.include_router(video_creation_router)
 app.include_router(user_routes.router)
