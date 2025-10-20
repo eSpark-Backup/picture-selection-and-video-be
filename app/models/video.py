@@ -1,15 +1,17 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from datetime import datetime
+from sqlalchemy import Column, String, Integer, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-import uuid
 from app.database.connection import Base
+
 
 class Video(Base):
     __tablename__ = "videos"
 
-    video_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
-    video_url = Column(String(500), nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    video_url = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    user = relationship("User", backref="videos")
+    user = relationship("User", back_populates="videos")
