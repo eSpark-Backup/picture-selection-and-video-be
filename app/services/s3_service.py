@@ -16,7 +16,16 @@ def upload_to_s3(file: UploadFile, filename: str):
     presigned_url = s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": BUCKET_NAME, "Key": filename},
-        ExpiresIn=3600,  # 1 hour
+        ExpiresIn=31536000,
     )
     return presigned_url
+
+def delete_from_s3(filename: str):
+    try:
+        s3.delete_object(Bucket=BUCKET_NAME, Key=filename)
+        return True
+    except Exception as e:
+        print(f"Error deleting file from S3: {e}")
+        return False
+
 
