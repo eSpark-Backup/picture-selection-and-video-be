@@ -1,11 +1,20 @@
 import boto3, os
 from fastapi import UploadFile
+from botocore.config import Config
+
+s3_config = Config(
+    retries={
+        "max_attempts": 3,   # retry up to 3 times
+        "mode": "standard",  # standard AWS retry mode
+    }
+)
 
 s3 = boto3.client(
     "s3",
     aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID", "AKIAXW5OGZH2FVQHOXV2"),
     aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY", "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"),
     region_name=os.getenv("AWS_REGION", "ap-southeast-1"),
+    config=s3_config,  # ✅ add this line
 )
 
 BUCKET_NAME = os.getenv("AWS_BUCKET_NAME", "espark-nfc-project")
