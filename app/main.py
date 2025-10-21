@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.video_creation_routes import router as video_creation_router
 from app.routes import user_routes
+from app.routes import reviewer_routes
 
 app = FastAPI(title="Photo Background Processor")
 
@@ -19,3 +20,4 @@ async def root():
 
 app.include_router(video_creation_router)
 app.include_router(user_routes.router)
+app.include_router(reviewer_routes.router)
