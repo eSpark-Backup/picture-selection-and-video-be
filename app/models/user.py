@@ -15,5 +15,6 @@ class User(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     photos = relationship("Photo", back_populates="user", cascade="all, delete-orphan")
+    original_photos = relationship("OriginalPhoto", back_populates="user", cascade="all, delete-orphan")
     videos = relationship("Video", back_populates="user", cascade="all, delete-orphan")
 
