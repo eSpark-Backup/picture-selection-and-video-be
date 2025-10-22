@@ -1,6 +1,7 @@
 import boto3, os
 from fastapi import UploadFile
 from botocore.config import Config
+import mimetypes
 
 s3_config = Config(
     retries={
@@ -19,9 +20,10 @@ s3 = boto3.client(
 
 BUCKET_NAME = os.getenv("AWS_BUCKET_NAME", "espark-nfc-project")
 
+def upload_to_s3(file, filename: str):
+    fileobj = getattr(file, "file", file)
+    content_type = getattr(file, "content_type", None) or mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-def upload_to_s3(file, filename: str, content_type="video/mp4"):
-    fileobj = getattr(file, "file", file)  # supports UploadFile and normal file
     s3.upload_fileobj(fileobj, BUCKET_NAME, filename, ExtraArgs={"ContentType": content_type})
     presigned_url = s3.generate_presigned_url(
         "get_object",
@@ -29,6 +31,7 @@ def upload_to_s3(file, filename: str, content_type="video/mp4"):
         ExpiresIn=31536000,
     )
     return presigned_url
+
 
 def delete_from_s3(filename: str):
     try:
