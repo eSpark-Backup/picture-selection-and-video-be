@@ -10,6 +10,7 @@ from app.models.user import User
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 from pydantic import BaseModel
+from app.auth.reviewer_auth import get_current_reviewer
 import jwt, os
 
 class PhotoStatusUpdate(BaseModel):
@@ -44,7 +45,7 @@ def reviewer_login(
     }
     
 @router.get("/dashboard")
-def get_all_photos_with_users(db: Session = Depends(get_db)):
+def get_all_photos_with_users(db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
     photos = (
         db.query(Photo, User)
         .join(User, User.id == Photo.user_id)
@@ -81,7 +82,7 @@ def get_all_photos_with_users(db: Session = Depends(get_db)):
     }
     
 @router.get("/photos/{photo_id}")
-def get_photo_by_id(photo_id: int, db: Session = Depends(get_db)):
+def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -110,7 +111,7 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/photos/{photo_id}")
-async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -152,7 +153,7 @@ async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = 
 
 
 @router.put("/update-photo-status/{photo_id}")
-def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session = Depends(get_db)):
+def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -176,7 +177,7 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
     }
     
 @router.delete("/photos/{photo_id}")
-def delete_photo(photo_id: int, db: Session = Depends(get_db)):
+def delete_photo(photo_id: int, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
