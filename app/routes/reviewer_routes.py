@@ -1,12 +1,20 @@
 from datetime import datetime
+import uuid
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi import UploadFile, File
+import fastapi
+import requests
 from app.services.s3_service import upload_to_s3
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.models.reviewer import Reviewer
 from app.models.photo import Photo
+from app.models.video import Video
 from app.models.user import User
+from app.services.video_creation import create_video_from_images
+from app.services.s3_service import upload_to_s3
+import tempfile
+import shutil
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 from pydantic import BaseModel
@@ -80,6 +88,155 @@ def get_all_photos_with_users(db: Session = Depends(get_db), current_reviewer: R
         "total": len(result),
         "data": result,
     }
+    
+@router.post("/create-video", dependencies=[Depends(get_current_reviewer)])
+async def create_video_for_user(
+    request: "fastapi.Request",
+    db: Session = Depends(get_db),
+    current_reviewer: Reviewer = Depends(get_current_reviewer),
+):
+    """
+    Create a video from selected photos (by photo IDs).
+    Accepts:
+    - JSON body: { "photo_ids": [1, 2, 3] }
+    - OR multipart/form-data with field 'photo_ids' as JSON string or CSV.
+    """
+    import json, os, uuid, tempfile, shutil, requests
+    from fastapi import HTTPException
+    from app.services.s3_service import s3, BUCKET_NAME
+
+    # --- 1) Parse incoming photo_ids ---
+    photo_ids = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and "photo_ids" in body:
+            photo_ids = body["photo_ids"]
+    except Exception:
+        pass
+
+    if not photo_ids:
+        try:
+            form = await request.form()
+            if "photo_ids" in form:
+                raw = form.get("photo_ids")
+                try:
+                    photo_ids = json.loads(raw)
+                except Exception:
+                    if isinstance(raw, str):
+                        photo_ids = [int(x) for x in raw.split(",") if x.strip().isdigit()]
+        except Exception:
+            pass
+
+    if not photo_ids or not isinstance(photo_ids, (list, tuple)) or len(photo_ids) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="photo_ids must be provided as a non-empty list. Example: {\"photo_ids\": [1,2,3]}",
+        )
+
+    try:
+        photo_ids = [int(pid) for pid in photo_ids]
+    except Exception:
+        raise HTTPException(status_code=400, detail="photo_ids must contain integers only.")
+
+    # --- 2) Validate photos ---
+    photos = db.query(Photo).filter(Photo.id.in_(photo_ids)).all()
+    if not photos:
+        raise HTTPException(status_code=404, detail="No valid photos found for given IDs.")
+
+    user_id = photos[0].user_id
+    if any(p.user_id != user_id for p in photos):
+        raise HTTPException(status_code=400, detail="All photos must belong to the same user.")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Associated user not found.")
+
+    # --- 3) Download photos securely with presigned URLs ---
+    temp_dir = tempfile.mkdtemp(prefix="video_photos_")
+    local_paths, video_path = [], None
+
+    try:
+        for photo in photos:
+            try:
+                # Generate a fresh, short-lived presigned URL for each file
+                download_url = s3.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": BUCKET_NAME, "Key": photo.filename},
+                    ExpiresIn=300,  # valid for 5 minutes
+                )
+
+                resp = requests.get(download_url, stream=True, timeout=20)
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                raise HTTPException(status_code=400, detail=f"Failed to download photo ID {photo.id}: {str(e)}")
+
+            safe_filename = os.path.basename(photo.filename) or f"{photo.id}.jpg"
+            local_path = os.path.join(temp_dir, safe_filename)
+
+            try:
+                with open(local_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                local_paths.append(local_path)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to save photo ID {photo.id}: {str(e)}")
+
+        if not local_paths:
+            raise HTTPException(status_code=400, detail="No photos were downloaded successfully.")
+
+        # --- 4) Create video ---
+        try:
+            video_path = create_video_from_images(local_paths)
+            if not video_path or not os.path.exists(video_path):
+                raise Exception("Video creation returned invalid or missing file.")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Video creation failed: {str(e)}")
+
+        # --- 5) Upload video to S3 ---
+        s3_filename = f"videos/{uuid.uuid4().hex}_final_video.mp4"
+        try:
+            with open(video_path, "rb") as vf:
+                s3_video_url = upload_to_s3(vf, s3_filename)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to upload video to S3: {str(e)}")
+
+        # --- 6) Save video record ---
+        try:
+            video_record = Video(user_id=user_id, video_url=s3_video_url, filename=s3_filename)
+            db.add(video_record)
+            db.commit()
+            db.refresh(video_record)
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database save failed: {str(e)}")
+
+        return {
+            "success": True,
+            "message": "Video created, uploaded, and saved successfully.",
+            "video_url": s3_video_url,
+            "video_id": video_record.id,
+            "user": {
+                "id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email
+            },
+            "total_photos_used": len(local_paths),
+        }
+
+    finally:
+        try:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            if video_path and os.path.exists(video_path):
+                os.remove(video_path)
+        except Exception:
+            pass
+
+
     
 @router.get("/photos/{photo_id}")
 def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):

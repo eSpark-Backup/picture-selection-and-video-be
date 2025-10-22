@@ -20,8 +20,9 @@ s3 = boto3.client(
 BUCKET_NAME = os.getenv("AWS_BUCKET_NAME", "espark-nfc-project")
 
 
-def upload_to_s3(file: UploadFile, filename: str):
-    s3.upload_fileobj(file.file, BUCKET_NAME, filename, ExtraArgs={"ContentType": file.content_type})
+def upload_to_s3(file, filename: str, content_type="video/mp4"):
+    fileobj = getattr(file, "file", file)  # supports UploadFile and normal file
+    s3.upload_fileobj(fileobj, BUCKET_NAME, filename, ExtraArgs={"ContentType": content_type})
     presigned_url = s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": BUCKET_NAME, "Key": filename},
