@@ -48,7 +48,9 @@ async def upload_original_photos(
 
         original_photo = OriginalPhoto(user_id=user.id, filename=filename, photo_url=s3_url)
         db.add(original_photo)
-        uploaded_photos.append({"photo_id": id, "filename": filename, "photo_url": s3_url})
+        db.flush()
+        db.refresh(original_photo)
+        uploaded_photos.append({"photo_id": original_photo.id, "filename": filename, "photo_url": s3_url})
 
     db.commit()
     return {
