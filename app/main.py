@@ -7,7 +7,7 @@ app = FastAPI(title="Photo Background Processor")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or list of allowed frontend URLs
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
