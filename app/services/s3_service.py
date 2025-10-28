@@ -6,6 +6,8 @@ from fastapi import UploadFile
 from typing import Any
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ---- AWS CONFIG ----

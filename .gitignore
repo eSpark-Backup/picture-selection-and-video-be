@@ -15,3 +15,4 @@ processed/
 # VS Code
 .vscode/
 app/test_db_connection.py
+.env
