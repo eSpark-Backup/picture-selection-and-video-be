@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.models.reviewer import Reviewer
 import jwt, os
+from dotenv import load_dotenv
+load_dotenv()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/reviewer/login")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecretkey")

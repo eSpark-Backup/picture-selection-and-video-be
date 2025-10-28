@@ -20,6 +20,8 @@ from passlib.context import CryptContext
 from pydantic import BaseModel
 from app.auth.reviewer_auth import get_current_reviewer
 import jwt, os
+from dotenv import load_dotenv
+load_dotenv()
 
 class PhotoStatusUpdate(BaseModel):
     status: str  # expected values: pending | approved | rejected
