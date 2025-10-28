@@ -6,8 +6,8 @@ import mediapipe as mp
 
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
-MAX_RESOLUTION = (1920, 1080)
-FPS = 60
+MAX_RESOLUTION = (1280, 720)
+FPS = 45
 
 # Tune these to control motion amount and limits
 MOVE_FRACTION_X = 0.08
