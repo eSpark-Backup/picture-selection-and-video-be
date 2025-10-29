@@ -65,7 +65,7 @@ def generate_clip_data(image_path, direction):
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
         raise ValueError(f"Cannot load {image_path}")
-    # img_bgr = resize_image(img_bgr)
+    img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
     face_center = detect_face_center_in_bgr(img_bgr)
     frame_center = (w // 2, h // 2)
