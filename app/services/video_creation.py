@@ -39,7 +39,7 @@ def resize_image(image, max_size=MAX_RESOLUTION):
     canvas = np.zeros((max_h, max_w, 3), dtype=np.uint8)
     x_offset = (max_w - new_w) // 2
     y_offset = (max_h - new_h) // 2
-    canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
+    canvas[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
     return canvas
 
 
@@ -65,7 +65,7 @@ def generate_clip_data(image_path, direction):
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
         raise ValueError(f"Cannot load {image_path}")
-    img_bgr = resize_image(img_bgr)
+    # img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
     face_center = detect_face_center_in_bgr(img_bgr)
     frame_center = (w // 2, h // 2)
@@ -81,8 +81,14 @@ def generate_clip_data(image_path, direction):
     return img_rgb, w, h, frame_center, radius, thickness, D_vec
 
 
+def _process_clip_args(params):
+    path, direction = params
+    return generate_clip_data(path, direction)
+
+
 def make_motion_clip(args):
     img_rgb, w, h, frame_center, radius, thickness, D_vec = args
+
     def make_frame(t):
         progress = _smooth_progress(t / DURATION_PER_IMAGE)
         dx, dy = D_vec * progress
@@ -96,18 +102,20 @@ def make_motion_clip(args):
         frame_bgr = cv2.cvtColor(np.clip(shifted, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
         cv2.circle(frame_bgr, frame_center, radius, (0, 0, 255), thickness, lineType=cv2.LINE_AA)
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
     return VideoClip(make_frame, duration=DURATION_PER_IMAGE)
 
 
 def create_video_from_images(image_paths):
-    args_list = []
-    for i, path in enumerate(image_paths):
-        direction = 1 if i % 2 == 0 else -1
-        args_list.append(generate_clip_data(path, direction))
+    if not image_paths:
+        raise ValueError("No image paths provided")
+
+    args_list = [(path, 1 if i % 2 == 0 else -1) for i, path in enumerate(image_paths)]
 
     with ProcessPoolExecutor() as executor:
-        clips = list(executor.map(make_motion_clip, args_list))
+        processed_data = list(executor.map(_process_clip_args, args_list))
 
+    clips = [make_motion_clip(data) for data in processed_data]
     final_clip = concatenate_videoclips(clips, method="compose")
     final_clip.write_videofile(OUTPUT_VIDEO, fps=FPS, codec="libx264", audio=False, threads=4)
     return os.path.abspath(OUTPUT_VIDEO)
