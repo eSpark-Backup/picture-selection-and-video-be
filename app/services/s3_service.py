@@ -9,7 +9,6 @@ from botocore.exceptions import BotoCoreError, ClientError
 from dotenv import load_dotenv
 load_dotenv()
 
-
 # ---- AWS CONFIG ----
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "AKIAXW5OGZH2FVQHOXV2")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "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")

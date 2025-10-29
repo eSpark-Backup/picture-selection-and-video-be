@@ -49,9 +49,9 @@ def detect_faces(image_bytes: bytes) -> bytes:
             face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
             faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(30, 30))
 
-        # Draw bounding boxes
-        for (x, y, w, h) in faces:
-            cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+        # # Draw bounding boxes
+        # for (x, y, w, h) in faces:
+        #     cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
         # Encode back to JPEG bytes (optimized)
         encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
