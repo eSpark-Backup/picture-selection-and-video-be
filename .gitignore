@@ -17,3 +17,4 @@ processed/
 app/test_db_connection.py
 .env
 scripts
+reset_db.py
