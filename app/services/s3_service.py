@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ---- AWS CONFIG ----
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "AKIAXW5OGZH2FVQHOXV2")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "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")
-AWS_REGION = os.getenv("AWS_REGION", "ap-southeast-1")
-BUCKET_NAME = os.getenv("AWS_BUCKET_NAME", "espark-nfc-project")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_REGION")
+BUCKET_NAME = os.getenv("AWS_BUCKET_NAME")
 
 
 # ---- OPTIMIZED CLIENT CONFIG ----
@@ -79,7 +79,7 @@ def upload_to_s3(file: UploadFile | Any, filename: str) -> str:
         presigned_url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": BUCKET_NAME, "Key": filename},
-            ExpiresIn=31536000,
+            ExpiresIn=604799,
         )
         return presigned_url
 

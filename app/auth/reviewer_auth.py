@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/reviewer/login")
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 
 
 def get_current_reviewer(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):

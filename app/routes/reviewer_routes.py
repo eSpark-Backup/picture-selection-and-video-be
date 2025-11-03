@@ -29,7 +29,7 @@ class PhotoStatusUpdate(BaseModel):
 router = APIRouter(prefix="/api/v1/reviewer", tags=["Reviewer"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 
 
 @router.post("/login")
