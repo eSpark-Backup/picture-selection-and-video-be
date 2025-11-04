@@ -1,31 +1,43 @@
+"""
+s3_service.py — Ultra-optimized AWS S3 service for high-throughput photo uploads
+"""
+
 import os
+import io
 import mimetypes
+import logging
 import threading
 import boto3
 from fastapi import UploadFile
-from typing import Any
+from typing import Any, BinaryIO
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
+from boto3.s3.transfer import TransferConfig
 from dotenv import load_dotenv
+
 load_dotenv()
 
-# ---- AWS CONFIG ----
+# --------------------------------------------------------------------
+# 🔧 AWS CONFIGURATION
+# --------------------------------------------------------------------
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION = os.getenv("AWS_REGION")
 BUCKET_NAME = os.getenv("AWS_BUCKET_NAME")
 
-
-# ---- OPTIMIZED CLIENT CONFIG ----
+# --------------------------------------------------------------------
+# ⚙️ CLIENT CONFIGURATION — Tuned for High Parallelism
+# --------------------------------------------------------------------
 s3_config = Config(
-    connect_timeout=5,
-    read_timeout=30,
-    max_pool_connections=50,
+    connect_timeout=3,
+    read_timeout=25,
+    max_pool_connections=100,  # allow heavy concurrency
     retries={"max_attempts": 5, "mode": "adaptive"},
+    tcp_keepalive=True,
 )
 
 _session = boto3.session.Session()
-s3 = _session.client(
+_s3_client = _session.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY_ID,
     aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
@@ -35,67 +47,143 @@ s3 = _session.client(
 
 _s3_lock = threading.Lock()
 
+# --------------------------------------------------------------------
+# 🧩 LOGGING
+# --------------------------------------------------------------------
+logger = logging.getLogger("s3_service")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
-# ---- INTERNAL MULTIPART UPLOAD ----
-def _upload_multipart(fileobj, filename: str, content_type: str):
-    """Handles large, high-speed multipart uploads."""
-    from boto3.s3.transfer import TransferConfig
+# --------------------------------------------------------------------
+# ⚡ INTERNAL: Dynamic TransferConfig
+# --------------------------------------------------------------------
+def _get_transfer_config(file_size: int | None = None) -> TransferConfig:
+    """
+    Dynamically tunes multipart settings:
+      - For small files (<10MB): disable multipart
+      - For large files: scale concurrency & chunk size
+    """
+    if not file_size:
+        file_size = 10 * 1024 * 1024  # assume medium file if unknown
 
-    transfer_config = TransferConfig(
-        multipart_threshold=5 * 1024 * 1024,  # 5 MB
-        multipart_chunksize=5 * 1024 * 1024,
-        max_concurrency=10,  # parallel threads
+    if file_size < 10 * 1024 * 1024:
+        # Small file, single-threaded
+        return TransferConfig(
+            multipart_threshold=10 * 1024 * 1024,
+            use_threads=False,
+        )
+
+    # For large files, use aggressive concurrency
+    concurrency = 16 if file_size < 200 * 1024 * 1024 else 20
+    chunk_size = 8 * 1024 * 1024 if file_size < 500 * 1024 * 1024 else 16 * 1024 * 1024
+
+    return TransferConfig(
+        multipart_threshold=5 * 1024 * 1024,
+        multipart_chunksize=chunk_size,
+        max_concurrency=concurrency,
         use_threads=True,
     )
 
-    with _s3_lock:
-        s3.upload_fileobj(
-            fileobj,
-            BUCKET_NAME,
-            filename,
-            ExtraArgs={"ContentType": content_type},
-            Config=transfer_config,
-        )
-
-
-# ---- MAIN UPLOAD FUNCTION ----
+# --------------------------------------------------------------------
+# 🚀 MAIN UPLOAD FUNCTION
+# --------------------------------------------------------------------
 def upload_to_s3(file: UploadFile | Any, filename: str) -> str:
     """
-    Ultra-fast and reliable uploader.
-    - Automatically detects MIME type
-    - Uses multipart + parallel uploads
-    - Returns presigned URL (valid 1 year)
+    High-speed S3 uploader:
+      ✅ Multipart & parallelized uploads
+      ✅ Streams directly to S3 (no full memory buffering)
+      ✅ Auto-detects content type
+      ✅ Returns presigned URL valid for 7 days
     """
     try:
-        fileobj = getattr(file, "file", file)
+        fileobj: BinaryIO = getattr(file, "file", file)
+        if not fileobj:
+            raise ValueError("Invalid file object provided.")
+
+        # Reset file pointer if needed
+        if hasattr(fileobj, "seek"):
+            try:
+                fileobj.seek(0)
+            except Exception:
+                pass
+
+        # Try to estimate file size (if available)
+        file_size = None
+        if hasattr(fileobj, "seek") and hasattr(fileobj, "tell"):
+            try:
+                pos = fileobj.tell()
+                fileobj.seek(0, os.SEEK_END)
+                file_size = fileobj.tell()
+                fileobj.seek(pos)
+            except Exception:
+                pass
+
         content_type = (
             getattr(file, "content_type", None)
             or mimetypes.guess_type(filename)[0]
             or "application/octet-stream"
         )
 
-        _upload_multipart(fileobj, filename, content_type)
+        transfer_config = _get_transfer_config(file_size)
 
-        presigned_url = s3.generate_presigned_url(
+        # Thread-safe upload
+        with _s3_lock:
+            _s3_client.upload_fileobj(
+                Fileobj=fileobj,
+                Bucket=BUCKET_NAME,
+                Key=filename,
+                ExtraArgs={"ContentType": content_type},
+                Config=transfer_config,
+            )
+
+        # Generate long-lived presigned URL (7 days)
+        presigned_url = _s3_client.generate_presigned_url(
             "get_object",
             Params={"Bucket": BUCKET_NAME, "Key": filename},
-            ExpiresIn=604799,
+            ExpiresIn=7 * 24 * 60 * 60,  # 7 days
         )
+
+        logger.info(f"S3 upload success: {filename} ({file_size or 'unknown'} bytes)")
         return presigned_url
 
     except (BotoCoreError, ClientError) as e:
-        raise RuntimeError(f"S3 upload failed for {filename}: {str(e)}")
+        logger.error(f"S3 upload failed for {filename}: {e}")
+        raise RuntimeError(f"S3 upload failed for {filename}: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"Unexpected upload error: {e}")
+        logger.error(f"Unexpected upload error for {filename}: {e}")
+        raise RuntimeError(f"Unexpected upload error: {e}") from e
 
-
-# ---- DELETE FUNCTION ----
+# --------------------------------------------------------------------
+# 🗑️ DELETE FUNCTION
+# --------------------------------------------------------------------
 def delete_from_s3(filename: str) -> bool:
-    """Deletes a file from S3 safely with error handling."""
+    """Thread-safe deletion with retry logic."""
     try:
         with _s3_lock:
-            s3.delete_object(Bucket=BUCKET_NAME, Key=filename)
+            _s3_client.delete_object(Bucket=BUCKET_NAME, Key=filename)
+        logger.info(f"S3 delete success: {filename}")
         return True
     except Exception as e:
-        print(f"Error deleting file from S3: {e}")
+        logger.warning(f"Error deleting {filename} from S3: {e}")
         return False
+
+# --------------------------------------------------------------------
+# 📦 UTILITY: CHECK FILE EXISTS
+# --------------------------------------------------------------------
+def file_exists_in_s3(filename: str) -> bool:
+    """Quick existence check (HEAD request)."""
+    try:
+        _s3_client.head_object(Bucket=BUCKET_NAME, Key=filename)
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "404":
+            return False
+        raise
+
+# --------------------------------------------------------------------
+# ✅ PUBLIC EXPORTS
+# --------------------------------------------------------------------
+s3 = _s3_client
