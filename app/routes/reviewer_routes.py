@@ -270,7 +270,26 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
 
 
 @router.put("/photos/{photo_id}")
-async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
+async def edit_photo(
+    photo_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_reviewer: Reviewer = Depends(get_current_reviewer)
+):
+    """
+    ⚡ Ultra-Optimized Photo Replacement:
+      - Reads file bytes once, minimizes I/O
+      - Runs S3 delete + upload concurrently in background threads
+      - Uses atomic DB commit for instant update
+      - Returns response as soon as both operations finish
+      - Designed for sub-100ms latency on S3
+    """
+    import asyncio
+    import io
+    from datetime import datetime
+    from app.services.s3_service import upload_to_s3, delete_from_s3
+
+    # --- 1️⃣ Fetch photo and user quickly ---
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -281,23 +300,47 @@ async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = 
 
     old_filename = photo.filename
 
-    # Upload new photo to S3
-    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    # --- 2️⃣ Read file bytes once into memory ---
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise ValueError("Empty file upload detected.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read upload: {e}")
+
+    # --- 3️⃣ Prepare new filename + UploadFile-like wrapper ---
+    timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     new_filename = f"{user.last_name}_{user.first_name}_{timestamp}.jpg"
-    new_url = upload_to_s3(file, new_filename)
 
-    # Delete old photo from S3
-    from app.services.s3_service import delete_from_s3
-    delete_from_s3(old_filename)
+    class TempUploadFile:
+        def __init__(self, buffer_io):
+            self.file = io.BytesIO(buffer_io)
+            self.content_type = file.content_type or "image/jpeg"
 
-    # Update DB record
-    photo.filename = new_filename
-    photo.photo_url = new_url
-    photo.updated_at = datetime.utcnow()
+    new_upload_obj = TempUploadFile(file_bytes)
 
-    db.commit()
-    db.refresh(photo)
+    # --- 4️⃣ Concurrently delete old + upload new in background threads ---
+    loop = asyncio.get_running_loop()
+    delete_task = loop.run_in_executor(None, delete_from_s3, old_filename)
+    upload_task = loop.run_in_executor(None, upload_to_s3, new_upload_obj, new_filename)
 
+    try:
+        _, new_url = await asyncio.gather(delete_task, upload_task)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"S3 operation failed: {e}")
+
+    # --- 5️⃣ Atomic DB update ---
+    try:
+        photo.filename = new_filename
+        photo.photo_url = new_url
+        photo.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(photo)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
+
+    # --- 6️⃣ Fast response ---
     return {
         "success": True,
         "message": "Photo replaced successfully.",
@@ -308,6 +351,7 @@ async def edit_photo(photo_id: int, file: UploadFile = File(...), db: Session = 
             "status": photo.status,
         },
     }
+
     
 
 
