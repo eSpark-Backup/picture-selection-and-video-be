@@ -8,7 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
 MAX_RESOLUTION = (1280, 720)
-FPS = 45
+FPS = 30
 
 MOVE_FRACTION_X = 0.08
 MOVE_FRACTION_Y = 0.08
