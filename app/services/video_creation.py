@@ -67,18 +67,61 @@ def generate_clip_data(image_path, direction):
         raise ValueError(f"Cannot load {image_path}")
     img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
-    face_center = detect_face_center_in_bgr(img_bgr)
-    frame_center = (w // 2, h // 2)
+
+    # Face detection
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    results = mp_face.process(rgb)
+
+    frame_center = np.array([w // 2, h // 2], float)
     radius = int(min(w, h) * 0.48)
     thickness = max(2, int(min(w, h) * 0.03))
     radius_safe = max(0, radius - SAFETY_MARGIN - thickness // 2)
+
+    # Collect all faces
+    face_centers = []
+    if results.detections:
+        for det in results.detections:
+            bbox = det.location_data.relative_bounding_box
+            cx = (bbox.xmin + bbox.width / 2) * w
+            cy = (bbox.ymin + bbox.height / 2) * h
+            face_centers.append([cx, cy])
+    else:
+        face_centers = [frame_center]
+
+    face_centers = np.array(face_centers)
+    mean_face = np.mean(face_centers, axis=0)
+
+    # Compute zoom-out factor based on spread of faces
+    max_dist = max(np.linalg.norm(fc - mean_face) for fc in face_centers)
+    zoom_out_factor = 1.0
+    if max_dist > 0.6 * radius_safe:
+        zoom_out_factor = 0.6 * radius_safe / max_dist
+
+    # Apply zoom-out by resizing
+    if zoom_out_factor < 1.0:
+        new_size = (int(w * zoom_out_factor), int(h * zoom_out_factor))
+        img_bgr = cv2.resize(img_bgr, new_size, interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        x_off = (w - new_size[0]) // 2
+        y_off = (h - new_size[1]) // 2
+        canvas[y_off:y_off + new_size[1], x_off:x_off + new_size[0]] = img_bgr
+        img_bgr = canvas
+
+    # Recenter faces around frame center (shift image)
+    shift_vec = frame_center - mean_face
+    M_shift = np.float32([[1, 0, shift_vec[0]], [0, 1, shift_vec[1]]])
+    img_bgr = cv2.warpAffine(img_bgr, M_shift, (w, h),
+                             flags=cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_CONSTANT,
+                             borderValue=(0, 0, 0))
+
+    # Motion vector
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
     D_vec = np.array([direction * move_x, direction * move_y], float)
-    face_pt = face_center if face_center else frame_center
-    D_vec *= _compute_alpha_cap(face_pt, frame_center, D_vec, radius_safe)
+
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
-    return img_rgb, w, h, frame_center, radius, thickness, D_vec
+    return img_rgb, w, h, tuple(frame_center.astype(int)), radius, thickness, D_vec
 
 
 def _process_clip_args(params):
