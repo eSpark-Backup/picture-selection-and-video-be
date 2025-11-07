@@ -8,10 +8,12 @@ from app.services.s3_service import upload_to_s3
 from app.services.bg_removal import remove_background
 from app.services.fill_black_bg import fill_black_background
 from app.services.face_detection import detect_faces
+from app.background_tasks.tasks import process_photos_task
 from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from PIL import Image
 import io
+from app.background_tasks.tasks import upload_original_photos_task
 from app.models.reviewer import Reviewer
 from app.models.original_photo import OriginalPhoto
 from fastapi.security import OAuth2PasswordRequestForm
@@ -27,92 +29,33 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     phone: str | None = None
 
-
 @router.post("/upload-original-photos/{user_id}")
 async def upload_original_photos(
     user_id: int,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-
-    import asyncio
-    import io
-    import os
-    from datetime import datetime
-    from uuid import uuid4
-    from concurrent.futures import ThreadPoolExecutor
-    from app.models.original_photo import OriginalPhoto
-    from app.services.s3_service import upload_to_s3
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
     if not files:
         raise HTTPException(status_code=400, detail="No files provided.")
     if len(files) > 30:
         raise HTTPException(status_code=400, detail="You can upload up to 30 photos only.")
 
-    cpu_count = os.cpu_count() or 2
-    max_concurrency = min(8, cpu_count * 2)  # balance IO+CPU mix
-    semaphore = asyncio.Semaphore(max_concurrency)
-    thread_pool = ThreadPoolExecutor(max_workers=max_concurrency)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
 
-    def upload_worker(file: UploadFile):
-        try:
-            file_bytes = file.file.read()
-            if not file_bytes:
-                raise ValueError("Empty file upload detected.")
+    file_names = [f.filename for f in files]
+    temp_dir = f"/tmp/uploads_user_{user_id}"
+    os.makedirs(temp_dir, exist_ok=True)
+    for f in files:
+        with open(os.path.join(temp_dir, f.filename), "wb") as buffer:
+            buffer.write(await f.read())
 
-            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-            unique = uuid4().hex[:8]
-            filename = f"original_{user.last_name}_{user.first_name}_{timestamp}_{unique}.jpg"
-
-            class TempUploadFile:
-                def __init__(self, buffer_io):
-                    self.file = io.BytesIO(buffer_io)
-                    self.content_type = file.content_type or "image/jpeg"
-
-            s3_url = upload_to_s3(TempUploadFile(file_bytes), filename)
-
-            return {"filename": filename, "s3_url": s3_url}
-
-        except Exception as e:
-            raise RuntimeError(f"S3 upload failed for {file.filename}: {e}") from e
-
-    async def bounded_upload(file: UploadFile):
-        async with semaphore:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(thread_pool, upload_worker, file)
-
-    try:
-        upload_tasks = [bounded_upload(file) for file in files]
-        upload_results = await asyncio.gather(*upload_tasks)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload error: {e}")
-
-    photo_objects = [
-        OriginalPhoto(user_id=user.id, filename=r["filename"], photo_url=r["s3_url"])
-        for r in upload_results
-    ]
-
-    try:
-        db.add_all(photo_objects)
-        db.commit()
-        for p in photo_objects:
-            db.refresh(p)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database commit failed: {e}")
-
-    uploaded_photos = [
-        {"photo_id": p.id, "filename": p.filename, "photo_url": p.photo_url}
-        for p in photo_objects
-    ]
+    upload_original_photos_task.delay(user_id, temp_dir, file_names)
 
     return {
         "success": True,
-        "message": f"{len(uploaded_photos)} original photos uploaded successfully.",
-        "uploaded_photos": uploaded_photos,
+        "message": "Your photos are being uploaded and processed in the background. You’ll be notified once complete.",
     }
 
 @router.get("/original-photos/{user_id}")
@@ -270,23 +213,6 @@ async def submit_processed_photos(
     request: fastapi.Request,
     db: Session = Depends(get_db),
 ):
-    import io
-    import json
-    import asyncio
-    import requests
-    from datetime import datetime
-    from uuid import uuid4
-    from PIL import Image
-    from concurrent.futures import ThreadPoolExecutor
-    from app.models.user import User
-    from app.models.original_photo import OriginalPhoto
-    from app.models.photo import Photo
-    from app.services.s3_service import s3, upload_to_s3, BUCKET_NAME
-
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
     try:
         body = await request.json()
         photo_ids = body.get("photo_ids")
@@ -295,95 +221,18 @@ async def submit_processed_photos(
 
     if not photo_ids or not isinstance(photo_ids, list) or len(photo_ids) == 0:
         raise HTTPException(status_code=400, detail="photo_ids must be a non-empty list.")
-
     if len(photo_ids) > 30:
         raise HTTPException(status_code=400, detail="You can submit up to 30 photos only.")
 
-    originals = (
-        db.query(OriginalPhoto)
-        .filter(OriginalPhoto.id.in_(photo_ids), OriginalPhoto.user_id == user_id)
-        .all()
-    )
-    if not originals:
-        raise HTTPException(status_code=404, detail="No matching original photos found.")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
 
-    cpu_count = (os.cpu_count() or 2)
-    max_concurrency = min(8, cpu_count * 2)
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    thread_pool = ThreadPoolExecutor(max_workers=max_concurrency)
-
-    def process_image_pipeline_get_upload_result(original):
-        try:
-            presigned_url = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": BUCKET_NAME, "Key": original.filename},
-                ExpiresIn=300,
-            )
-
-            resp = requests.get(presigned_url, stream=True, timeout=20)
-            resp.raise_for_status()
-            image_bytes = resp.content
-
-            from app.services.bg_removal import remove_background
-            from app.services.fill_black_bg import fill_black_background
-            from app.services.face_detection import detect_faces
-
-            processed_bytes = detect_faces(fill_black_background(remove_background(image_bytes)))
-
-            processed_image = Image.open(io.BytesIO(processed_bytes)).convert("RGB")
-            out_buffer = io.BytesIO()
-            processed_image.save(out_buffer, format="JPEG", quality=95, optimize=True)
-            out_buffer.seek(0)
-
-            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-            unique = uuid4().hex[:8]
-            filename = f"{user.last_name}_{user.first_name}_{timestamp}_{unique}.jpg"
-
-            class TempUploadFile:
-                def __init__(self, buffer_io):
-                    self.file = buffer_io
-                    self.content_type = "image/jpeg"
-
-            s3_url = upload_to_s3(TempUploadFile(out_buffer), filename)
-
-            return {"filename": filename, "s3_url": s3_url}
-
-        except Exception as e:
-            raise RuntimeError(f"Processing failed for {original.filename}: {e}") from e
-
-    async def bounded_process(original):
-        async with semaphore:
-            return await asyncio.get_running_loop().run_in_executor(thread_pool, process_image_pipeline_get_upload_result, original)
-
-    try:
-        tasks = [bounded_process(orig) for orig in originals]
-        results = await asyncio.gather(*tasks)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    photo_objects = []
-    for res in results:
-        photo_objects.append(
-            Photo(user_id=user.id, filename=res["filename"], photo_url=res["s3_url"])
-        )
-
-    try:
-        db.add_all(photo_objects)
-        db.commit()
-        for p in photo_objects:
-            db.refresh(p)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error while saving processed photos: {e}")
-
-    uploaded_photos = [
-        {"photo_id": p.id, "filename": p.filename, "photo_url": p.photo_url}
-        for p in photo_objects
-    ]
+    process_photos_task.delay(user_id, photo_ids)
 
     return {
         "success": True,
-        "message": "Original photos processed and uploaded successfully.",
-        "uploaded_photos": uploaded_photos,
+        "message": "Your photos are being processed in the background. You’ll be notified once it’s done.",
     }
+
     
