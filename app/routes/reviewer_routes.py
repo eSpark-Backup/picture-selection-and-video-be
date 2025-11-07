@@ -18,6 +18,7 @@ import shutil
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 from pydantic import BaseModel
+from sqlalchemy.orm import joinedload
 from app.auth.reviewer_auth import get_current_reviewer
 import jwt, os
 from dotenv import load_dotenv
@@ -55,19 +56,28 @@ def reviewer_login(
     }
     
 @router.get("/dashboard")
-def get_all_photos_with_users(db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
+def get_all_photos_with_users(
+    db: Session = Depends(get_db),
+    current_reviewer: Reviewer = Depends(get_current_reviewer),
+    page: int = 1,
+    limit: int = 10
+):
+    if page < 1 or limit < 1:
+        raise HTTPException(status_code=400, detail="page and limit must be positive integers.")
+
+    total_photos = db.query(Photo).count()
+
     photos = (
-        db.query(Photo, User)
-        .join(User, User.id == Photo.user_id)
+        db.query(Photo)
+        .options(joinedload(Photo.user))
         .order_by(Photo.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
         .all()
     )
 
-    if not photos:
-        raise HTTPException(status_code=404, detail="No photos found.")
-
     result = []
-    for photo, user in photos:
+    for photo in photos:
         result.append({
             "photo_id": photo.id,
             "photo_url": photo.photo_url,
@@ -76,20 +86,25 @@ def get_all_photos_with_users(db: Session = Depends(get_db), current_reviewer: R
             "created_at": photo.created_at,
             "updated_at": photo.updated_at,
             "user": {
-                "user_id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "email": user.email,
-                "phone": user.phone,
-            },
+                "user_id": photo.user.id if photo.user else None,
+                "first_name": photo.user.first_name if photo.user else None,
+                "last_name": photo.user.last_name if photo.user else None,
+                "email": photo.user.email if photo.user else None,
+                "phone": photo.user.phone if photo.user else None,
+            }
         })
 
     return {
         "success": True,
         "message": "All user photos fetched successfully.",
-        "total": len(result),
+        "page": page,
+        "limit": limit,
+        "total_photos": total_photos,
+        "total_pages": (total_photos + limit - 1) // limit,
         "data": result,
     }
+
+
     
 @router.post("/create-video", dependencies=[Depends(get_current_reviewer)])
 async def create_video_for_user(
@@ -97,17 +112,10 @@ async def create_video_for_user(
     db: Session = Depends(get_db),
     current_reviewer: Reviewer = Depends(get_current_reviewer),
 ):
-    """
-    Create a video from selected photos (by photo IDs).
-    Accepts:
-    - JSON body: { "photo_ids": [1, 2, 3] }
-    - OR multipart/form-data with field 'photo_ids' as JSON string or CSV.
-    """
     import json, os, uuid, tempfile, shutil, requests
     from fastapi import HTTPException
     from app.services.s3_service import s3, BUCKET_NAME
 
-    # --- 1) Parse incoming photo_ids ---
     photo_ids = None
     try:
         body = await request.json()
@@ -140,7 +148,6 @@ async def create_video_for_user(
     except Exception:
         raise HTTPException(status_code=400, detail="photo_ids must contain integers only.")
 
-    # --- 2) Validate photos ---
     photos = db.query(Photo).filter(Photo.id.in_(photo_ids)).all()
     if not photos:
         raise HTTPException(status_code=404, detail="No valid photos found for given IDs.")
@@ -153,14 +160,12 @@ async def create_video_for_user(
     if not user:
         raise HTTPException(status_code=404, detail="Associated user not found.")
 
-    # --- 3) Download photos securely with presigned URLs ---
     temp_dir = tempfile.mkdtemp(prefix="video_photos_")
     local_paths, video_path = [], None
 
     try:
         for photo in photos:
             try:
-                # Generate a fresh, short-lived presigned URL for each file
                 download_url = s3.generate_presigned_url(
                     "get_object",
                     Params={"Bucket": BUCKET_NAME, "Key": photo.filename},
@@ -187,7 +192,6 @@ async def create_video_for_user(
         if not local_paths:
             raise HTTPException(status_code=400, detail="No photos were downloaded successfully.")
 
-        # --- 4) Create video ---
         try:
             video_path = create_video_from_images(local_paths)
             if not video_path or not os.path.exists(video_path):
@@ -195,7 +199,6 @@ async def create_video_for_user(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Video creation failed: {str(e)}")
 
-        # --- 5) Upload video to S3 ---
         s3_filename = f"videos/{uuid.uuid4().hex}_final_video.mp4"
         try:
             with open(video_path, "rb") as vf:
@@ -203,7 +206,6 @@ async def create_video_for_user(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to upload video to S3: {str(e)}")
 
-        # --- 6) Save video record ---
         try:
             video_record = Video(user_id=user_id, video_url=s3_video_url, filename=s3_filename)
             db.add(video_record)
@@ -276,20 +278,11 @@ async def edit_photo(
     db: Session = Depends(get_db),
     current_reviewer: Reviewer = Depends(get_current_reviewer)
 ):
-    """
-    ⚡ Ultra-Optimized Photo Replacement:
-      - Reads file bytes once, minimizes I/O
-      - Runs S3 delete + upload concurrently in background threads
-      - Uses atomic DB commit for instant update
-      - Returns response as soon as both operations finish
-      - Designed for sub-100ms latency on S3
-    """
     import asyncio
     import io
     from datetime import datetime
     from app.services.s3_service import upload_to_s3, delete_from_s3
 
-    # --- 1️⃣ Fetch photo and user quickly ---
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
@@ -300,7 +293,6 @@ async def edit_photo(
 
     old_filename = photo.filename
 
-    # --- 2️⃣ Read file bytes once into memory ---
     try:
         file_bytes = await file.read()
         if not file_bytes:
@@ -308,7 +300,6 @@ async def edit_photo(
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to read upload: {e}")
 
-    # --- 3️⃣ Prepare new filename + UploadFile-like wrapper ---
     timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
     new_filename = f"{user.last_name}_{user.first_name}_{timestamp}.jpg"
 
@@ -319,7 +310,6 @@ async def edit_photo(
 
     new_upload_obj = TempUploadFile(file_bytes)
 
-    # --- 4️⃣ Concurrently delete old + upload new in background threads ---
     loop = asyncio.get_running_loop()
     delete_task = loop.run_in_executor(None, delete_from_s3, old_filename)
     upload_task = loop.run_in_executor(None, upload_to_s3, new_upload_obj, new_filename)
@@ -329,7 +319,6 @@ async def edit_photo(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"S3 operation failed: {e}")
 
-    # --- 5️⃣ Atomic DB update ---
     try:
         photo.filename = new_filename
         photo.photo_url = new_url
@@ -340,7 +329,6 @@ async def edit_photo(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
 
-    # --- 6️⃣ Fast response ---
     return {
         "success": True,
         "message": "Photo replaced successfully.",
@@ -350,9 +338,7 @@ async def edit_photo(
             "filename": photo.filename,
             "status": photo.status,
         },
-    }
-
-    
+    }    
 
 
 @router.put("/update-photo-status/{photo_id}")

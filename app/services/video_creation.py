@@ -68,7 +68,6 @@ def generate_clip_data(image_path, direction):
     img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
 
-    # Face detection
     rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
     results = mp_face.process(rgb)
 
@@ -77,7 +76,6 @@ def generate_clip_data(image_path, direction):
     thickness = max(2, int(min(w, h) * 0.03))
     radius_safe = max(0, radius - SAFETY_MARGIN - thickness // 2)
 
-    # Collect all faces
     face_centers = []
     if results.detections:
         for det in results.detections:
@@ -91,13 +89,11 @@ def generate_clip_data(image_path, direction):
     face_centers = np.array(face_centers)
     mean_face = np.mean(face_centers, axis=0)
 
-    # Compute zoom-out factor based on spread of faces
     max_dist = max(np.linalg.norm(fc - mean_face) for fc in face_centers)
     zoom_out_factor = 1.0
     if max_dist > 0.6 * radius_safe:
         zoom_out_factor = 0.6 * radius_safe / max_dist
 
-    # Apply zoom-out by resizing
     if zoom_out_factor < 1.0:
         new_size = (int(w * zoom_out_factor), int(h * zoom_out_factor))
         img_bgr = cv2.resize(img_bgr, new_size, interpolation=cv2.INTER_AREA)
@@ -107,7 +103,6 @@ def generate_clip_data(image_path, direction):
         canvas[y_off:y_off + new_size[1], x_off:x_off + new_size[0]] = img_bgr
         img_bgr = canvas
 
-    # Recenter faces around frame center (shift image)
     shift_vec = frame_center - mean_face
     M_shift = np.float32([[1, 0, shift_vec[0]], [0, 1, shift_vec[1]]])
     img_bgr = cv2.warpAffine(img_bgr, M_shift, (w, h),
@@ -115,7 +110,6 @@ def generate_clip_data(image_path, direction):
                              borderMode=cv2.BORDER_CONSTANT,
                              borderValue=(0, 0, 0))
 
-    # Motion vector
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
     D_vec = np.array([direction * move_x, direction * move_y], float)

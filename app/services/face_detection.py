@@ -1,14 +1,3 @@
-# app/services/face_detection.py
-"""
-Ultra-optimized face detection service for up to 30 concurrent images.
-
-✅ ThreadPoolExecutor concurrency for batch processing
-✅ Optional GPU acceleration via CUDA Haar Cascade
-✅ Preloaded cascade models for zero re-init overhead
-✅ Smart resizing and memory-efficient decoding
-✅ Optimized JPEG encoding pipeline
-"""
-
 import cv2
 import numpy as np
 import logging
@@ -16,18 +5,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger("face_detection")
 
-# ---- Global config ----
-MAX_WORKERS = 6  # Tune to CPU core count
+MAX_WORKERS = 6
 _executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
-# ---- Preload cascades for reuse ----
 try:
     CPU_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
 except Exception as e:
     logger.error(f"Failed to load Haar cascade: {e}")
     CPU_CASCADE = None
 
-# ---- GPU setup (optional) ----
 try:
     _HAS_CUDA = cv2.cuda.getCudaEnabledDeviceCount() > 0
     if _HAS_CUDA:
@@ -40,26 +26,20 @@ except Exception:
     _HAS_CUDA = False
     GPU_CASCADE = None
 
-
 def _process_single_image(image_bytes: bytes) -> bytes:
-    """Detects faces in one image with max efficiency."""
     try:
-        # Decode in-memory bytes to array
         np_arr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError("Invalid image data")
 
-        # Resize large images for performance
         h, w = img.shape[:2]
         if w > 1024:
             scale = 1024 / w
             img = cv2.resize(img, (1024, int(h * scale)), interpolation=cv2.INTER_AREA)
 
-        # Convert once to grayscale
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Try GPU acceleration first
         faces = []
         used_gpu = False
         if _HAS_CUDA and GPU_CASCADE is not None:
@@ -74,7 +54,6 @@ def _process_single_image(image_bytes: bytes) -> bytes:
                 used_gpu = False
                 faces = []
 
-        # CPU fallback if needed
         if not faces or len(faces) == 0:
             if CPU_CASCADE is None:
                 raise RuntimeError("No CPU face cascade available")
@@ -86,7 +65,6 @@ def _process_single_image(image_bytes: bytes) -> bytes:
         # for (x, y, w, h) in faces:
         #     cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-        # Encode efficiently to JPEG
         success, encoded_img = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
         if not success:
             raise RuntimeError("Failed to encode image to JPEG")
@@ -100,20 +78,10 @@ def _process_single_image(image_bytes: bytes) -> bytes:
 
 
 def detect_faces(image_bytes: bytes) -> bytes:
-    """Single image face detection (backward-compatible API)."""
     return _process_single_image(image_bytes)
 
 
 def detect_faces_batch(images: list[bytes]) -> list[bytes]:
-    """
-    Detects faces in multiple images concurrently.
-
-    Args:
-        images: List of raw image byte arrays (up to 30)
-
-    Returns:
-        List of processed JPEG byte arrays with detected faces.
-    """
     if not images:
         return []
 
