@@ -1,11 +1,10 @@
 from .celery_app import celery_app
 from app.services.s3_service import upload_to_s3
-from app.models import User, OriginalPhoto, Photo
+from app.models import User
 from app.database.connection import SessionLocal
 import os, io
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
-from PIL import Image
 
 @celery_app.task(name="upload_original_photos_task")
 def upload_original_photos_task(user_id, temp_dir, file_names):
@@ -67,9 +66,10 @@ def process_photos_task(user_id, photo_ids):
                     self.file = io.BytesIO(buf)
                     self.content_type = "image/jpeg"
 
-            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
-            unique = uuid4().hex[:8]
-            filename = f"processed_{user_id}_{timestamp}_{unique}.jpg"
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+            uuid4().hex[:8]
+            user = db.query(User).filter(User.id == user_id).first()
+            filename = f"{user.last_name.lower()}_{user.first_name.lower()}_{timestamp}.jpg"
             s3_url = upload_to_s3(TempUploadFile(processed), filename)
             photo = Photo(user_id=user_id, filename=filename, photo_url=s3_url)
             db.add(photo)
