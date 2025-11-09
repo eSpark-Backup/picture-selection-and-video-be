@@ -67,7 +67,6 @@ def process_photos_task(user_id, photo_ids):
                     self.content_type = "image/jpeg"
 
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-            uuid4().hex[:8]
             user = db.query(User).filter(User.id == user_id).first()
             filename = f"{user.last_name.lower()}_{user.first_name.lower()}_{timestamp}.jpg"
             s3_url = upload_to_s3(TempUploadFile(processed), filename)
