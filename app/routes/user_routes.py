@@ -13,7 +13,6 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr
 from PIL import Image
 import io
-import aiofiles
 from app.background_tasks.tasks import upload_original_photos_task
 from app.models.reviewer import Reviewer
 from app.models.original_photo import OriginalPhoto
@@ -48,13 +47,9 @@ async def upload_original_photos(
     file_names = [f.filename for f in files]
     temp_dir = f"/tmp/uploads_user_{user_id}"
     os.makedirs(temp_dir, exist_ok=True)
-    # for f in files:
-    #     with open(os.path.join(temp_dir, f.filename), "wb") as buffer:
-    #         buffer.write(await f.read())
     for f in files:
-        async with aiofiles.open(os.path.join(temp_dir, f.filename), "wb") as buffer:
-            content = await f.read()
-            await buffer.write(content)
+        with open(os.path.join(temp_dir, f.filename), "wb") as buffer:
+            buffer.write(await f.read())
 
     upload_original_photos_task.delay(user_id, temp_dir, file_names)
 
