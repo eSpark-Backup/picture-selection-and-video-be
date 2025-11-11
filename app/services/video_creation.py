@@ -3,7 +3,8 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from moviepy.editor import VideoClip, concatenate_videoclips
-from concurrent.futures import ProcessPoolExecutor
+# from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
@@ -149,7 +150,8 @@ def create_video_from_images(image_paths):
 
     args_list = [(path, 1 if i % 2 == 0 else -1) for i, path in enumerate(image_paths)]
 
-    with ProcessPoolExecutor() as executor:
+    # with ProcessPoolExecutor() as executor:
+    with ThreadPoolExecutor() as executor:
         processed_data = list(executor.map(_process_clip_args, args_list))
 
     clips = [make_motion_clip(data) for data in processed_data]
