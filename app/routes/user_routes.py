@@ -46,11 +46,20 @@ async def upload_original_photos(
         raise HTTPException(status_code=404, detail="User not found.")
 
     file_names = [f.filename for f in files]
+    MAX_FILE_SIZE = 5 * 1024 * 1024
     temp_dir = f"/tmp/uploads_user_{user_id}"
     os.makedirs(temp_dir, exist_ok=True)
     for f in files:
+        file_content = await f.read()
+
+        if len(file_content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{f.filename}' exceeds the 5 MB size limit."
+            )
+            
         with open(os.path.join(temp_dir, f.filename), "wb") as buffer:
-            buffer.write(await f.read())
+            buffer.write(file_content)
 
     upload_original_photos_task.delay(user_id, temp_dir, file_names)
     send_photos_submission_email.delay(user.email, user.first_name)
