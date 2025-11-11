@@ -18,6 +18,7 @@ from app.models.reviewer import Reviewer
 from app.models.original_photo import OriginalPhoto
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
+from app.background_tasks.tasks import send_photos_submission_email
 import jwt, os
 
 router = APIRouter(prefix="/api/v1/users", tags=["Users"])
@@ -52,6 +53,7 @@ async def upload_original_photos(
             buffer.write(await f.read())
 
     upload_original_photos_task.delay(user_id, temp_dir, file_names)
+    send_photos_submission_email.delay(user.email, user.first_name)
 
     return {
         "success": True,
@@ -229,6 +231,7 @@ async def submit_processed_photos(
         raise HTTPException(status_code=404, detail="User not found.")
 
     process_photos_task.delay(user_id, photo_ids)
+    send_photos_submission_email.delay(user.email, user.first_name)
 
     return {
         "success": True,

@@ -5,6 +5,7 @@ from app.database.connection import SessionLocal
 import os, io
 from datetime import datetime, timezone
 from uuid import uuid4
+from app.services.email_service import send_email
 
 @celery_app.task(name="upload_original_photos_task")
 def upload_original_photos_task(user_id, temp_dir, file_names):
@@ -85,6 +86,7 @@ def create_video_for_user_task(photo_ids):
     from app.models.user import User
     from app.services.video_creation import create_video_from_images
     from app.services.s3_service import upload_to_s3, s3, BUCKET_NAME
+    from app.background_tasks.tasks import send_video_ready_email
     import tempfile, os, uuid, shutil, requests
 
     db = SessionLocal()
@@ -122,10 +124,30 @@ def create_video_for_user_task(photo_ids):
         new_video = Video(user_id=user.id, video_url=s3_url, filename=s3_filename)
         db.add(new_video)
         db.commit()
+        
+
+        send_video_ready_email.delay(
+            user_email=user.email,
+            user_name=f"{user.first_name}",
+            video_link=s3_url
+        )
 
     finally:
         db.close()
         shutil.rmtree(temp_dir, ignore_errors=True)
         if 'video_path' in locals() and os.path.exists(video_path):
             os.remove(video_path)
+
+
+@celery_app.task(name="send_photos_submission_email")
+def send_photos_submission_email(user_email, user_name):
+    subject = "Your photos have been submitted!"
+    body = f"Hi {user_name},\n\nYour photos have been submitted successfully. We will notify you once your video is ready.\n\nThank you!"
+    send_email(user_email, subject, body)
+
+@celery_app.task(name="send_video_ready_email")
+def send_video_ready_email(user_email, user_name, video_link):
+    subject = "Your video is ready!"
+    body = f"Hi {user_name},\n\nYour video has been created successfully. You can watch it here:\n{video_link}\n\nThank you!"
+    send_email(user_email, subject, body)
 
