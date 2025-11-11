@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from app.services.email_service import send_email
 
-@celery_app.task(name="upload_original_photos_task")
+# @celery_app.task(name="upload_original_photos_task")
+@celery_app.task(name="upload_original_photos_task", queue="photo_queue")
 def upload_original_photos_task(user_id, temp_dir, file_names):
     db = SessionLocal()
     from app.models.original_photo import OriginalPhoto
@@ -33,7 +34,8 @@ def upload_original_photos_task(user_id, temp_dir, file_names):
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-@celery_app.task(name="process_photos_task")
+# @celery_app.task(name="process_photos_task")
+@celery_app.task(name="process_photos_task", queue="photo_queue")
 def process_photos_task(user_id, photo_ids):
     from app.database.connection import SessionLocal
     from app.models.original_photo import OriginalPhoto
@@ -77,8 +79,9 @@ def process_photos_task(user_id, photo_ids):
         db.commit()
     finally:
         db.close()
-        
-@celery_app.task(name="create_video_for_user_task")
+
+# @celery_app.task(name="create_video_for_user_task")        
+@celery_app.task(name="create_video_for_user_task", queue="video_queue")
 def create_video_for_user_task(photo_ids):
     from app.database.connection import SessionLocal
     from app.models.photo import Photo
@@ -138,14 +141,15 @@ def create_video_for_user_task(photo_ids):
         if 'video_path' in locals() and os.path.exists(video_path):
             os.remove(video_path)
 
-
-@celery_app.task(name="send_photos_submission_email")
+# @celery_app.task(name="send_photos_submission_email")
+@celery_app.task(name="send_photos_submission_email", queue="email_queue")
 def send_photos_submission_email(user_email, user_name):
     subject = "Your photos have been submitted!"
     body = f"Hi {user_name},\n\nYour photos have been submitted successfully. We will notify you once your video is ready.\n\nThank you!"
     send_email(user_email, subject, body)
 
-@celery_app.task(name="send_video_ready_email")
+# @celery_app.task(name="send_video_ready_email")
+@celery_app.task(name="send_video_ready_email", queue="email_queue")
 def send_video_ready_email(user_email, user_name, video_link):
     subject = "Your video is ready!"
     body = f"Hi {user_name},\n\nYour video has been created successfully. You can watch it here:\n{video_link}\n\nThank you!"
