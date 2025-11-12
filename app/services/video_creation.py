@@ -3,8 +3,7 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from moviepy.editor import VideoClip, concatenate_videoclips
-from concurrent.futures import ProcessPoolExecutor
-# from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
@@ -16,14 +15,20 @@ MOVE_FRACTION_Y = 0.08
 MAX_MOVE_PIXELS = 70
 SAFETY_MARGIN = 8
 
-mp_face = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+def _create_face_detector():
+    import mediapipe as mp
+    return mp.solutions.face_detection.FaceDetection(
+        model_selection=1, 
+        min_detection_confidence=0.5
+    )
 
 
 def detect_face_center_in_bgr(image_bgr):
     if image_bgr is None:
         return None
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    results = mp_face.process(rgb)
+    with _create_face_detector() as face_detector:
+        results = face_detector.process(rgb)
     if not results.detections:
         return None
     bbox = results.detections[0].location_data.relative_bounding_box
@@ -68,14 +73,16 @@ def generate_clip_data(image_path, direction):
         raise ValueError(f"Cannot load {image_path}")
     img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
-
-    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-    results = mp_face.process(rgb)
+    
+    with _create_face_detector() as face_detector:
+        rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        results = face_detector.process(rgb)
 
     frame_center = np.array([w // 2, h // 2], float)
     radius = int(min(w, h) * 0.48)
     thickness = max(2, int(min(w, h) * 0.03))
-    radius_safe = max(0, radius - SAFETY_MARGIN - thickness // 2)
+    radius_safe = radius - (SAFETY_MARGIN * 1.5)
+
 
     face_centers = []
     if results.detections:
@@ -85,34 +92,84 @@ def generate_clip_data(image_path, direction):
             cy = (bbox.ymin + bbox.height / 2) * h
             face_centers.append([cx, cy])
     else:
-        face_centers = [frame_center]
+        face_centers = [frame_center.copy()]
 
-    face_centers = np.array(face_centers)
+    face_centers = np.array(face_centers, dtype=float)
+
     mean_face = np.mean(face_centers, axis=0)
 
-    max_dist = max(np.linalg.norm(fc - mean_face) for fc in face_centers)
+    if face_centers.shape[0] == 1:
+        max_dist = 0.0
+    else:
+        max_dist = float(np.max(np.linalg.norm(face_centers - mean_face, axis=1)))
+
     zoom_out_factor = 1.0
-    if max_dist > 0.6 * radius_safe:
-        zoom_out_factor = 0.6 * radius_safe / max_dist
+
+    containment_margin = 10.0
+
+    if max_dist > 0:
+        candidate = (radius_safe - containment_margin) / max_dist
+        if candidate < 1.0:
+            zoom_out_factor = float(candidate)
+
+    min_zoom = 0.3
+    zoom_out_factor = max(min_zoom, min(1.0, zoom_out_factor))
+
+    for _ in range(8):
+        new_w = max(1, int(w * zoom_out_factor))
+        new_h = max(1, int(h * zoom_out_factor))
+        x_off = (w - new_w) // 2
+        y_off = (h - new_h) // 2
+
+        transformed = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
+
+        dists = np.linalg.norm(transformed - frame_center, axis=1)
+        max_after = float(np.max(dists))
+
+        if max_after <= (radius_safe - containment_margin):
+            break
+
+        required_zoom = (radius_safe - containment_margin) / (max_after + 1e-6)
+        zoom_out_factor = float(max(min_zoom, min(zoom_out_factor * required_zoom * 0.98, zoom_out_factor * 0.995)))
 
     if zoom_out_factor < 1.0:
-        new_size = (int(w * zoom_out_factor), int(h * zoom_out_factor))
-        img_bgr = cv2.resize(img_bgr, new_size, interpolation=cv2.INTER_AREA)
+        new_size = (max(1, int(w * zoom_out_factor)), max(1, int(h * zoom_out_factor)))
+        img_small = cv2.resize(img_bgr, new_size, interpolation=cv2.INTER_AREA)
         canvas = np.zeros((h, w, 3), dtype=np.uint8)
         x_off = (w - new_size[0]) // 2
         y_off = (h - new_size[1]) // 2
-        canvas[y_off:y_off + new_size[1], x_off:x_off + new_size[0]] = img_bgr
+        canvas[y_off:y_off + new_size[1], x_off:x_off + new_size[0]] = img_small
         img_bgr = canvas
 
+        face_centers = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
+    else:
+        face_centers = face_centers.astype(float)
+
+    mean_face = np.mean(face_centers, axis=0)
+
     shift_vec = frame_center - mean_face
+    shift_norm = np.linalg.norm(shift_vec)
+    max_shift = radius_safe * 0.8
+    if shift_norm > max_shift and shift_norm > 0:
+        shift_vec = shift_vec / shift_norm * max_shift
+
     M_shift = np.float32([[1, 0, shift_vec[0]], [0, 1, shift_vec[1]]])
     img_bgr = cv2.warpAffine(img_bgr, M_shift, (w, h),
                              flags=cv2.INTER_LINEAR,
                              borderMode=cv2.BORDER_CONSTANT,
                              borderValue=(0, 0, 0))
 
+    face_centers = face_centers + shift_vec
+
+
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
+    
+    max_allowed_move = radius_safe * 0.15
+    move_x = min(move_x, max_allowed_move)
+    move_y = min(move_y, max_allowed_move)
+
+    
     D_vec = np.array([direction * move_x, direction * move_y], float)
 
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
@@ -150,8 +207,7 @@ def create_video_from_images(image_paths):
 
     args_list = [(path, 1 if i % 2 == 0 else -1) for i, path in enumerate(image_paths)]
 
-    with ProcessPoolExecutor() as executor:
-    # with ThreadPoolExecutor() as executor:
+    with ThreadPoolExecutor() as executor:
         processed_data = list(executor.map(_process_clip_args, args_list))
 
     clips = [make_motion_clip(data) for data in processed_data]
