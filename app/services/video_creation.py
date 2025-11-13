@@ -104,7 +104,7 @@ def generate_clip_data(image_path, direction):
         face_size = max(face_w, face_h)
 
         # target face should cover 42% of circle diameter
-        target_fraction = 0.60
+        target_fraction = 0.3
         desired_size = (2 * radius) * target_fraction
 
         scale_factor = desired_size / max(face_size, 1)
@@ -131,7 +131,7 @@ def generate_clip_data(image_path, direction):
     # ---------------- SHIFT TO CENTER ----------------
     shift_vec = frame_center - mean_face
     shift_norm = np.linalg.norm(shift_vec)
-    max_shift = radius_safe * 1.2
+    max_shift = radius_safe * 0.8
     if shift_norm > max_shift:
         shift_vec = shift_vec / shift_norm * max_shift
 
