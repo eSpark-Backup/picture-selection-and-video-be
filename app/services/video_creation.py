@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
 MAX_RESOLUTION = (1280, 720)
-FPS = 5
+FPS = 30
 
 MOVE_FRACTION_X = 0.1
 MOVE_FRACTION_Y = 0.1
@@ -70,6 +70,7 @@ def generate_clip_data(image_path, direction):
     img_bgr = cv2.imread(image_path)
     if img_bgr is None:
         raise ValueError(f"Cannot load {image_path}")
+
     img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
 
@@ -98,24 +99,20 @@ def generate_clip_data(image_path, direction):
 
     # ---------------- ZOOM LOGIC ----------------
     if results.detections:
-        # face bounding box dimensions
         face_w = bbox.width * w
         face_h = bbox.height * h
         face_size = max(face_w, face_h)
 
-        # target face should cover 42% of circle diameter
-        target_fraction = 0.42
+        target_fraction = 0.42                     # face covers ~42% of circle
         desired_size = (2 * radius) * target_fraction
 
         scale_factor = desired_size / max(face_size, 1)
         scale_factor = np.clip(scale_factor, 0.7, 2.8)
-
     else:
-        # no face → scale full image into circle
         scale_factor = (2 * radius) / min(w, h)
         scale_factor = np.clip(scale_factor, 0.7, 2.8)
 
-    # apply zoom (single correct zoom!)
+    # ---------------- APPLY ZOOM ----------------
     M_zoom = cv2.getRotationMatrix2D(tuple(frame_center), 0, scale_factor)
     img_bgr = cv2.warpAffine(
         img_bgr, M_zoom, (w, h),
@@ -128,10 +125,11 @@ def generate_clip_data(image_path, direction):
     face_centers = (face_centers - frame_center) * scale_factor + frame_center
     mean_face = np.mean(face_centers, axis=0)
 
-    # ---------------- SHIFT TO CENTER ----------------
+    # ---------------- SHIFT FACE TO CENTER ----------------
     shift_vec = frame_center - mean_face
     shift_norm = np.linalg.norm(shift_vec)
     max_shift = radius_safe * 0.8
+
     if shift_norm > max_shift:
         shift_vec = shift_vec / shift_norm * max_shift
 
@@ -146,10 +144,32 @@ def generate_clip_data(image_path, direction):
         borderValue=(0, 0, 0)
     )
 
-    # movement vector
     face_centers += shift_vec
+
+    # ---------------- CIRCLE-FIT SAFE CROP (IMPORTANT FIX!) ----------------
+    crop_left   = int(frame_center[0] - radius)
+    crop_right  = int(frame_center[0] + radius)
+    crop_top    = int(frame_center[1] - radius)
+    crop_bottom = int(frame_center[1] + radius)
+
+    # ensure safe boundaries
+    crop_left = max(crop_left, 0)
+    crop_top = max(crop_top, 0)
+    crop_right = min(crop_right, w)
+    crop_bottom = min(crop_bottom, h)
+
+    # crop image to circle-square
+    cropped = img_bgr[crop_top:crop_bottom, crop_left:crop_right]
+
+    # paste back into black frame -> NO black bars!
+    canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    canvas[crop_top:crop_bottom, crop_left:crop_right] = cropped
+    img_bgr = canvas
+
+    # ---------------- MOVEMENT VECTOR ----------------
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
+
     max_allowed_move = radius_safe * 0.15
     move_x = min(move_x, max_allowed_move)
     move_y = min(move_y, max_allowed_move)
