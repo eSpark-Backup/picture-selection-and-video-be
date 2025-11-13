@@ -238,7 +238,7 @@ def generate_clip_data(image_path, direction):
     scale_factor = (circle_diameter * desired_fill_fraction) / max(min(w, h), 1.0)
 
     # Clamp scale to avoid over/under zoom
-    scale_factor = np.clip(scale_factor, 1.0, 1.8)
+    scale_factor = np.clip(scale_factor, 0.3, 3.0)
 
     # Zoom around the frame center so entire image stays centered
     M_zoom = cv2.getRotationMatrix2D(tuple(frame_center), 0, scale_factor)
