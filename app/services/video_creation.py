@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
 MAX_RESOLUTION = (1280, 720)
-FPS = 30
+FPS = 5
 
 MOVE_FRACTION_X = 0.1
 MOVE_FRACTION_Y = 0.1
@@ -188,18 +188,67 @@ def generate_clip_data(image_path, direction):
         )
 
         face_centers = (face_centers - mean_face) * scale_factor + mean_face
+    
+    # if results.detections:
+    #     # Get the first detected face bounding box in pixels
+    #     bbox = results.detections[0].location_data.relative_bounding_box
+    #     face_w = bbox.width * w
+    #     face_h = bbox.height * h
+    #     face_size = max(face_w, face_h)
 
-    else:
+    #     # --- Desired relative face size inside the circle ---
+    #     target_face_fraction = 0.35  # Face should cover ~35% of the circle diameter
+    #     desired_face_size = (2 * radius) * target_face_fraction
+
+    #     # Compute how much we need to zoom to reach target face size
+    #     scale_factor = desired_face_size / max(face_size, 1.0)
+
+    #     # Limit zoom range to avoid extreme distortions
+    #     scale_factor = np.clip(scale_factor, 0.9, 1.6)
+
+    #     # Apply zoom centered around the detected face
+    #     M_zoom = cv2.getRotationMatrix2D(tuple(mean_face), 0, scale_factor)
+    #     img_bgr = cv2.warpAffine(
+    #         img_bgr, M_zoom, (w, h),
+    #         flags=cv2.INTER_LINEAR,
+    #         borderMode=cv2.BORDER_CONSTANT,
+    #         borderValue=(0, 0, 0)
+    #     )
+
+    #     # Update face center coordinates after scaling
+    #     face_centers = (face_centers - mean_face) * scale_factor + mean_face
+
+    # else:
         
-        new_w = min(int(w * zoom_out_factor), w)
-        new_h = min(int(h * zoom_out_factor), h)
-        img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        canvas = np.zeros((h, w, 3), dtype=np.uint8)
-        x_off = max((w - new_w) // 2, 0)
-        y_off = max((h - new_h) // 2, 0)
-        canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
-        img_bgr = canvas
-        face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
+    #     new_w = min(int(w * zoom_out_factor), w)
+    #     new_h = min(int(h * zoom_out_factor), h)
+    #     img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    #     canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    #     x_off = max((w - new_w) // 2, 0)
+    #     y_off = max((h - new_h) // 2, 0)
+    #     canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
+    #     img_bgr = canvas
+    #     face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
+    
+        # --- Uniform image-based zoom to fill the red circle area ---
+    # Compute scale so the smaller dimension fits the circle diameter closely
+    image_diag = np.hypot(w, h)
+    circle_diameter = 2 * radius
+    desired_fill_fraction = 0.95  # 95% of the circle diameter (tight but safe)
+    scale_factor = (circle_diameter * desired_fill_fraction) / max(min(w, h), 1.0)
+
+    # Clamp scale to avoid over/under zoom
+    scale_factor = np.clip(scale_factor, 1.0, 1.8)
+
+    # Zoom around the frame center so entire image stays centered
+    M_zoom = cv2.getRotationMatrix2D(tuple(frame_center), 0, scale_factor)
+    img_bgr = cv2.warpAffine(
+        img_bgr, M_zoom, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0)
+    )
+
 
     mean_face = np.mean(face_centers, axis=0)
 
