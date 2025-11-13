@@ -81,38 +81,48 @@ def generate_clip_data(image_path, direction):
     frame_center = np.array([w // 2, h // 2], float)
     radius = int(min(w, h) * 0.48)
     thickness = max(2, int(min(w, h) * 0.03))
-    radius_safe = radius - (SAFETY_MARGIN * 1.5)
+    radius_safe = radius - 12
 
-    # ---------------- FACE CENTER ----------------
+    # -----------------------------
+    # Detect face centers
+    # -----------------------------
     face_centers = []
     if results.detections:
-        det = results.detections[0]
-        bbox = det.location_data.relative_bounding_box
-        cx = (bbox.xmin + bbox.width / 2) * w
-        cy = (bbox.ymin + bbox.height / 2) * h
-        face_centers.append([cx, cy])
+        for det in results.detections:
+            bbox = det.location_data.relative_bounding_box
+            cx = (bbox.xmin + bbox.width / 2) * w
+            cy = (bbox.ymin + bbox.height / 2) * h
+            face_centers.append([cx, cy])
     else:
         face_centers = [frame_center.copy()]
 
     face_centers = np.array(face_centers, float)
     mean_face = np.mean(face_centers, axis=0)
 
-    # ---------------- ZOOM LOGIC ----------------
+    # --------------------------------
+    # *** FINAL SCALE FIX ***
+    # --------------------------------
     if results.detections:
+        bbox = results.detections[0].location_data.relative_bounding_box
         face_w = bbox.width * w
         face_h = bbox.height * h
-        face_size = max(face_w, face_h)
 
-        target_fraction = 0.42                     # face covers ~42% of circle
-        desired_size = (2 * radius) * target_fraction
+        circle_diam = 2 * radius
 
-        scale_factor = desired_size / max(face_size, 1)
-        scale_factor = np.clip(scale_factor, 0.7, 2.8)
+        # ensures head and chin NEVER cut
+        scale_x = (circle_diam * 0.55) / face_w
+        scale_y = (circle_diam * 0.75) / face_h
+
+        scale_factor = min(scale_x, scale_y)
+        scale_factor = float(np.clip(scale_factor, 0.6, 2.2))
+
     else:
         scale_factor = (2 * radius) / min(w, h)
-        scale_factor = np.clip(scale_factor, 0.7, 2.8)
+        scale_factor = float(np.clip(scale_factor, 0.6, 2.2))
 
-    # ---------------- APPLY ZOOM ----------------
+    # --------------------------------
+    # Apply zoom
+    # --------------------------------
     M_zoom = cv2.getRotationMatrix2D(tuple(frame_center), 0, scale_factor)
     img_bgr = cv2.warpAffine(
         img_bgr, M_zoom, (w, h),
@@ -121,52 +131,32 @@ def generate_clip_data(image_path, direction):
         borderValue=(0, 0, 0)
     )
 
-    # update face centers after zoom
+    # update face centers
     face_centers = (face_centers - frame_center) * scale_factor + frame_center
     mean_face = np.mean(face_centers, axis=0)
 
-    # ---------------- SHIFT FACE TO CENTER ----------------
+    # --------------------------------
+    # Auto-center face inside circle
+    # --------------------------------
     shift_vec = frame_center - mean_face
     shift_norm = np.linalg.norm(shift_vec)
-    max_shift = radius_safe * 0.8
+    max_shift = radius_safe * 0.80
 
-    if shift_norm > max_shift:
+    if shift_norm > max_shift and shift_norm > 0:
         shift_vec = shift_vec / shift_norm * max_shift
 
-    M_shift = np.float32([
-        [1, 0, shift_vec[0]],
-        [0, 1, shift_vec[1]]
-    ])
+    M_shift = np.float32([[1, 0, shift_vec[0]], [0, 1, shift_vec[1]]])
     img_bgr = cv2.warpAffine(
         img_bgr, M_shift, (w, h),
         flags=cv2.INTER_LINEAR,
         borderMode=cv2.BORDER_CONSTANT,
         borderValue=(0, 0, 0)
     )
-
     face_centers += shift_vec
 
-    # ---------------- CIRCLE-FIT SAFE CROP (IMPORTANT FIX!) ----------------
-    crop_left   = int(frame_center[0] - radius)
-    crop_right  = int(frame_center[0] + radius)
-    crop_top    = int(frame_center[1] - radius)
-    crop_bottom = int(frame_center[1] + radius)
-
-    # ensure safe boundaries
-    crop_left = max(crop_left, 0)
-    crop_top = max(crop_top, 0)
-    crop_right = min(crop_right, w)
-    crop_bottom = min(crop_bottom, h)
-
-    # crop image to circle-square
-    cropped = img_bgr[crop_top:crop_bottom, crop_left:crop_right]
-
-    # paste back into black frame -> NO black bars!
-    canvas = np.zeros((h, w, 3), dtype=np.uint8)
-    canvas[crop_top:crop_bottom, crop_left:crop_right] = cropped
-    img_bgr = canvas
-
-    # ---------------- MOVEMENT VECTOR ----------------
+    # --------------------------------
+    # Final movement vector
+    # --------------------------------
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
 
@@ -176,8 +166,11 @@ def generate_clip_data(image_path, direction):
 
     D_vec = np.array([direction * move_x, direction * move_y], float)
 
-    # ---------------- OUTPUT ----------------
+    # --------------------------------
+    # Convert to RGB format for output
+    # --------------------------------
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
+
     return img_rgb, w, h, tuple(frame_center.astype(int)), radius, thickness, D_vec
 
 def _process_clip_args(params):
