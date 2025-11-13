@@ -18,7 +18,7 @@ MAX_WORK_RESOLUTION = (1920, 1080)
 def _create_face_detector():
     import mediapipe as mp
     return mp.solutions.face_detection.FaceDetection(
-        model_selection=1, 
+        model_selection=1,
         min_detection_confidence=0.5
     )
 
@@ -72,7 +72,7 @@ def generate_clip_data(image_path, direction):
         raise ValueError(f"Cannot load {image_path}")
     img_bgr = resize_image(img_bgr)
     h, w, _ = img_bgr.shape
-    
+
     with _create_face_detector() as face_detector:
         rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         results = face_detector.process(rgb)
@@ -82,165 +82,40 @@ def generate_clip_data(image_path, direction):
     thickness = max(2, int(min(w, h) * 0.03))
     radius_safe = radius - (SAFETY_MARGIN * 1.5)
 
-
+    # ---------------- FACE CENTER ----------------
     face_centers = []
     if results.detections:
-        for det in results.detections:
-            bbox = det.location_data.relative_bounding_box
-            cx = (bbox.xmin + bbox.width / 2) * w
-            cy = (bbox.ymin + bbox.height / 2) * h
-            face_centers.append([cx, cy])
+        det = results.detections[0]
+        bbox = det.location_data.relative_bounding_box
+        cx = (bbox.xmin + bbox.width / 2) * w
+        cy = (bbox.ymin + bbox.height / 2) * h
+        face_centers.append([cx, cy])
     else:
         face_centers = [frame_center.copy()]
 
-    face_centers = np.array(face_centers, dtype=float)
-
+    face_centers = np.array(face_centers, float)
     mean_face = np.mean(face_centers, axis=0)
-    
-    if face_centers.shape[0] == 1 and results.detections:
-        bbox = results.detections[0].location_data.relative_bounding_box
-        face_area_ratio = bbox.width * bbox.height
-        
-        if face_area_ratio < 0.05:
-            zoom_in_factor = 1
-        elif face_area_ratio < 0.12:
-            zoom_in_factor = 1
-        else:
-            zoom_in_factor = 1
 
-
-        HARD_ZOOM_CAP = 1.25
-        zoom_in_factor = min(zoom_in_factor, HARD_ZOOM_CAP)
-
-        face_w = bbox.width * w
-        face_h = bbox.height * h
-        face_radius = max(face_w, face_h) / 2.0
-
-        dist = float(np.linalg.norm(mean_face - frame_center))
-
-        extra_margin = max(12.0, SAFETY_MARGIN * 1.0)
-
-        if dist > 1e-6:
-            scale_limit = (radius_safe - extra_margin) / (dist + face_radius)
-        else:
-            scale_limit = HARD_ZOOM_CAP
-
-        safe_zoom = max(1.0, min(zoom_in_factor, float(scale_limit)))
-
-        zoom_out_factor = float(safe_zoom)
-        max_dist = 0.0
-        
-    else:
-        max_dist = float(np.max(np.linalg.norm(face_centers - mean_face, axis=1)))
-        zoom_out_factor = 1.0
-
-    containment_margin = 10.0
-
-    if max_dist > 0:
-        candidate = (radius_safe - containment_margin) / max_dist
-        if candidate < 1.0:
-            zoom_out_factor = float(candidate)
-
-    min_zoom = 0.3
-    max_zoom = 1.5
-    zoom_out_factor = max(min_zoom, min(max_zoom, zoom_out_factor))
-    
-    if face_centers.shape[0] > 1:
-        for _ in range(8):
-            new_w = max(1, int(w * zoom_out_factor))
-            new_h = max(1, int(h * zoom_out_factor))
-            x_off = (w - new_w) // 2
-            y_off = (h - new_h) // 2
-
-            transformed = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
-
-            dists = np.linalg.norm(transformed - frame_center, axis=1)
-            max_after = float(np.max(dists))
-
-            if max_after <= (radius_safe - containment_margin):
-                break
-
-            required_zoom = (radius_safe - containment_margin) / (max_after + 1e-6)
-            zoom_out_factor = float(max(min_zoom, min(zoom_out_factor * required_zoom * 0.98, zoom_out_factor * 0.995)))
-
+    # ---------------- ZOOM LOGIC ----------------
     if results.detections:
-        bbox = results.detections[0].location_data.relative_bounding_box
+        # face bounding box dimensions
         face_w = bbox.width * w
         face_h = bbox.height * h
+        face_size = max(face_w, face_h)
 
-        
-        EXTRA_MARGIN_PX = max(20.0, SAFETY_MARGIN * 2.0)
+        # target face should cover 42% of circle diameter
+        target_fraction = 0.42
+        desired_size = (2 * radius) * target_fraction
 
-        zoom_x = w / (2 * abs(mean_face[0] - w/2) + face_w + 2.0 * EXTRA_MARGIN_PX)
-        zoom_y = h / (2 * abs(mean_face[1] - h/2) + face_h + 2.0 * EXTRA_MARGIN_PX)
+        scale_factor = desired_size / max(face_size, 1)
+        scale_factor = np.clip(scale_factor, 0.7, 2.8)
 
-        HARD_SCALE_CAP = 1.15
+    else:
+        # no face → scale full image into circle
+        scale_factor = (2 * radius) / min(w, h)
+        scale_factor = np.clip(scale_factor, 0.7, 2.8)
 
-        scale_factor = min(float(zoom_x), float(zoom_y), float(zoom_out_factor), HARD_SCALE_CAP)
-        scale_factor = max(0.9, scale_factor) 
-
-        M_zoom = cv2.getRotationMatrix2D(tuple(mean_face), 0, scale_factor)
-        img_bgr = cv2.warpAffine(
-            img_bgr, M_zoom, (w, h),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_CONSTANT,
-            borderValue=(0, 0, 0)
-        )
-
-        face_centers = (face_centers - mean_face) * scale_factor + mean_face
-    
-    # if results.detections:
-    #     # Get the first detected face bounding box in pixels
-    #     bbox = results.detections[0].location_data.relative_bounding_box
-    #     face_w = bbox.width * w
-    #     face_h = bbox.height * h
-    #     face_size = max(face_w, face_h)
-
-    #     # --- Desired relative face size inside the circle ---
-    #     target_face_fraction = 0.35  # Face should cover ~35% of the circle diameter
-    #     desired_face_size = (2 * radius) * target_face_fraction
-
-    #     # Compute how much we need to zoom to reach target face size
-    #     scale_factor = desired_face_size / max(face_size, 1.0)
-
-    #     # Limit zoom range to avoid extreme distortions
-    #     scale_factor = np.clip(scale_factor, 0.9, 1.6)
-
-    #     # Apply zoom centered around the detected face
-    #     M_zoom = cv2.getRotationMatrix2D(tuple(mean_face), 0, scale_factor)
-    #     img_bgr = cv2.warpAffine(
-    #         img_bgr, M_zoom, (w, h),
-    #         flags=cv2.INTER_LINEAR,
-    #         borderMode=cv2.BORDER_CONSTANT,
-    #         borderValue=(0, 0, 0)
-    #     )
-
-    #     # Update face center coordinates after scaling
-    #     face_centers = (face_centers - mean_face) * scale_factor + mean_face
-
-    # else:
-        
-    #     new_w = min(int(w * zoom_out_factor), w)
-    #     new_h = min(int(h * zoom_out_factor), h)
-    #     img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    #     canvas = np.zeros((h, w, 3), dtype=np.uint8)
-    #     x_off = max((w - new_w) // 2, 0)
-    #     y_off = max((h - new_h) // 2, 0)
-    #     canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
-    #     img_bgr = canvas
-    #     face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
-    
-        # --- Uniform image-based zoom to fill the red circle area ---
-    # Compute scale so the smaller dimension fits the circle diameter closely
-    image_diag = np.hypot(w, h)
-    circle_diameter = 2 * radius
-    desired_fill_fraction = 0.95  # 95% of the circle diameter (tight but safe)
-    scale_factor = (circle_diameter * desired_fill_fraction) / max(min(w, h), 1.0)
-
-    # Clamp scale to avoid over/under zoom
-    scale_factor = np.clip(scale_factor, 0.3, 3.0)
-
-    # Zoom around the frame center so entire image stays centered
+    # apply zoom (single correct zoom!)
     M_zoom = cv2.getRotationMatrix2D(tuple(frame_center), 0, scale_factor)
     img_bgr = cv2.warpAffine(
         img_bgr, M_zoom, (w, h),
@@ -249,37 +124,41 @@ def generate_clip_data(image_path, direction):
         borderValue=(0, 0, 0)
     )
 
-
+    # update face centers after zoom
+    face_centers = (face_centers - frame_center) * scale_factor + frame_center
     mean_face = np.mean(face_centers, axis=0)
 
+    # ---------------- SHIFT TO CENTER ----------------
     shift_vec = frame_center - mean_face
     shift_norm = np.linalg.norm(shift_vec)
     max_shift = radius_safe * 0.8
-    if shift_norm > max_shift and shift_norm > 0:
+    if shift_norm > max_shift:
         shift_vec = shift_vec / shift_norm * max_shift
 
-    M_shift = np.float32([[1, 0, shift_vec[0]], [0, 1, shift_vec[1]]])
-    img_bgr = cv2.warpAffine(img_bgr, M_shift, (w, h),
-                             flags=cv2.INTER_LINEAR,
-                             borderMode=cv2.BORDER_CONSTANT,
-                             borderValue=(0, 0, 0))
+    M_shift = np.float32([
+        [1, 0, shift_vec[0]],
+        [0, 1, shift_vec[1]]
+    ])
+    img_bgr = cv2.warpAffine(
+        img_bgr, M_shift, (w, h),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_CONSTANT,
+        borderValue=(0, 0, 0)
+    )
 
-    face_centers = face_centers + shift_vec
-
-
+    # movement vector
+    face_centers += shift_vec
     move_x = min(w * MOVE_FRACTION_X, MAX_MOVE_PIXELS)
     move_y = min(h * MOVE_FRACTION_Y, MAX_MOVE_PIXELS)
-    
     max_allowed_move = radius_safe * 0.15
     move_x = min(move_x, max_allowed_move)
     move_y = min(move_y, max_allowed_move)
 
-    
     D_vec = np.array([direction * move_x, direction * move_y], float)
 
+    # ---------------- OUTPUT ----------------
     img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
     return img_rgb, w, h, tuple(frame_center.astype(int)), radius, thickness, D_vec
-
 
 def _process_clip_args(params):
     path, direction = params
