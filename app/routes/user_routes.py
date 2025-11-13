@@ -60,7 +60,12 @@ async def upload_original_photos(
 def get_all_original_photos(user_id: int, db: Session = Depends(get_db)):
     photos = db.query(OriginalPhoto).filter(OriginalPhoto.user_id == user_id).all()
     if not photos:
-        raise HTTPException(status_code=404, detail="No original photos found.")
+        return {
+            "success": True,
+            "message": "No original photos found.",
+            "total": 0,
+            "data": [],
+        }
     return {
         "success": True,
         "total": len(photos),

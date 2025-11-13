@@ -7,10 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
 MAX_RESOLUTION = (1280, 720)
-FPS = 5
+FPS = 30
 
-MOVE_FRACTION_X = 0.08
-MOVE_FRACTION_Y = 0.08
+MOVE_FRACTION_X = 0.1
+MOVE_FRACTION_Y = 0.1
 MAX_MOVE_PIXELS = 70
 SAFETY_MARGIN = 8
 MAX_WORK_RESOLUTION = (1920, 1080)
@@ -100,17 +100,36 @@ def generate_clip_data(image_path, direction):
     if face_centers.shape[0] == 1 and results.detections:
         bbox = results.detections[0].location_data.relative_bounding_box
         face_area_ratio = bbox.width * bbox.height
-
+        
         if face_area_ratio < 0.05:
-            zoom_out_factor = 1.6
+            zoom_in_factor = 1
         elif face_area_ratio < 0.12:
-            zoom_out_factor = 1.4
+            zoom_in_factor = 1
         else:
-            zoom_out_factor = 1.2
+            zoom_in_factor = 1
 
-        zoom_out_factor = min(zoom_out_factor, 1.5)
+
+        HARD_ZOOM_CAP = 1.25
+        zoom_in_factor = min(zoom_in_factor, HARD_ZOOM_CAP)
+
+        face_w = bbox.width * w
+        face_h = bbox.height * h
+        face_radius = max(face_w, face_h) / 2.0
+
+        dist = float(np.linalg.norm(mean_face - frame_center))
+
+        extra_margin = max(12.0, SAFETY_MARGIN * 1.0)
+
+        if dist > 1e-6:
+            scale_limit = (radius_safe - extra_margin) / (dist + face_radius)
+        else:
+            scale_limit = HARD_ZOOM_CAP
+
+        safe_zoom = max(1.0, min(zoom_in_factor, float(scale_limit)))
+
+        zoom_out_factor = float(safe_zoom)
         max_dist = 0.0
-
+        
     else:
         max_dist = float(np.max(np.linalg.norm(face_centers - mean_face, axis=1)))
         zoom_out_factor = 1.0
@@ -143,17 +162,44 @@ def generate_clip_data(image_path, direction):
 
             required_zoom = (radius_safe - containment_margin) / (max_after + 1e-6)
             zoom_out_factor = float(max(min_zoom, min(zoom_out_factor * required_zoom * 0.98, zoom_out_factor * 0.995)))
-    
-    new_w = min(int(w * zoom_out_factor), w)
-    new_h = min(int(h * zoom_out_factor), h)
-    img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
-    canvas = np.zeros((h, w, 3), dtype=np.uint8)
-    x_off = max((w - new_w) // 2, 0)
-    y_off = max((h - new_h) // 2, 0)
-    canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
-    img_bgr = canvas
 
-    face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
+    if results.detections:
+        bbox = results.detections[0].location_data.relative_bounding_box
+        face_w = bbox.width * w
+        face_h = bbox.height * h
+
+        
+        EXTRA_MARGIN_PX = max(20.0, SAFETY_MARGIN * 2.0)
+
+        zoom_x = w / (2 * abs(mean_face[0] - w/2) + face_w + 2.0 * EXTRA_MARGIN_PX)
+        zoom_y = h / (2 * abs(mean_face[1] - h/2) + face_h + 2.0 * EXTRA_MARGIN_PX)
+
+        HARD_SCALE_CAP = 1.15
+
+        scale_factor = min(float(zoom_x), float(zoom_y), float(zoom_out_factor), HARD_SCALE_CAP)
+        scale_factor = max(0.9, scale_factor) 
+
+        M_zoom = cv2.getRotationMatrix2D(tuple(mean_face), 0, scale_factor)
+        img_bgr = cv2.warpAffine(
+            img_bgr, M_zoom, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0)
+        )
+
+        face_centers = (face_centers - mean_face) * scale_factor + mean_face
+
+    else:
+        
+        new_w = min(int(w * zoom_out_factor), w)
+        new_h = min(int(h * zoom_out_factor), h)
+        img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        canvas = np.zeros((h, w, 3), dtype=np.uint8)
+        x_off = max((w - new_w) // 2, 0)
+        y_off = max((h - new_h) // 2, 0)
+        canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
+        img_bgr = canvas
+        face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
 
     mean_face = np.mean(face_centers, axis=0)
 

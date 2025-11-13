@@ -54,6 +54,10 @@ def reviewer_login(
         "message": "Reviewer logged in successfully.",
         "access_token": token,
         "token_type": "bearer",
+        "reviewer": {
+            "username": reviewer.username,
+            "email": reviewer.email,
+        },
     }
     
 @router.get("/dashboard")
@@ -76,6 +80,17 @@ def get_all_photos_with_users(
         .limit(limit)
         .all()
     )
+    
+    if not photos:
+        return {
+            "success": True,
+            "message": "No photos found.",
+            "page": page,
+            "limit": limit,
+            "total_photos": 0,
+            "total_pages": 0,
+            "data": [],
+        }
 
     result = []
     for photo in photos:
@@ -108,6 +123,13 @@ def get_all_photos_with_users(
 @router.get("/videos", dependencies=[Depends(get_current_reviewer)])
 def get_all_videos(db: Session = Depends(get_db)):
     videos = db.query(Video).order_by(Video.created_at.desc()).all()
+    if not videos:
+        return {
+            "success": True,
+            "message": "No videos found.",
+            "total_videos": 0,
+            "data": [],
+        }
     result = []
     for v in videos:
         result.append({
