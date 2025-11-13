@@ -1,19 +1,19 @@
 import os
 import cv2
 import numpy as np
-import mediapipe as mp
 from moviepy.editor import VideoClip, concatenate_videoclips
 from concurrent.futures import ThreadPoolExecutor
 
 OUTPUT_VIDEO = "processed_video.mp4"
 DURATION_PER_IMAGE = 5
 MAX_RESOLUTION = (1280, 720)
-FPS = 30
+FPS = 5
 
 MOVE_FRACTION_X = 0.08
 MOVE_FRACTION_Y = 0.08
 MAX_MOVE_PIXELS = 70
 SAFETY_MARGIN = 8
+MAX_WORK_RESOLUTION = (1920, 1080)
 
 def _create_face_detector():
     import mediapipe as mp
@@ -34,7 +34,6 @@ def detect_face_center_in_bgr(image_bgr):
     bbox = results.detections[0].location_data.relative_bounding_box
     h, w, _ = image_bgr.shape
     return int((bbox.xmin + bbox.width / 2) * w), int((bbox.ymin + bbox.height / 2) * h)
-
 
 def resize_image(image, max_size=MAX_RESOLUTION):
     h, w = image.shape[:2]
@@ -97,13 +96,24 @@ def generate_clip_data(image_path, direction):
     face_centers = np.array(face_centers, dtype=float)
 
     mean_face = np.mean(face_centers, axis=0)
+    
+    if face_centers.shape[0] == 1 and results.detections:
+        bbox = results.detections[0].location_data.relative_bounding_box
+        face_area_ratio = bbox.width * bbox.height
 
-    if face_centers.shape[0] == 1:
+        if face_area_ratio < 0.05:
+            zoom_out_factor = 1.6
+        elif face_area_ratio < 0.12:
+            zoom_out_factor = 1.4
+        else:
+            zoom_out_factor = 1.2
+
+        zoom_out_factor = min(zoom_out_factor, 1.5)
         max_dist = 0.0
+
     else:
         max_dist = float(np.max(np.linalg.norm(face_centers - mean_face, axis=1)))
-
-    zoom_out_factor = 1.0
+        zoom_out_factor = 1.0
 
     containment_margin = 10.0
 
@@ -113,37 +123,37 @@ def generate_clip_data(image_path, direction):
             zoom_out_factor = float(candidate)
 
     min_zoom = 0.3
-    zoom_out_factor = max(min_zoom, min(1.0, zoom_out_factor))
+    max_zoom = 1.5
+    zoom_out_factor = max(min_zoom, min(max_zoom, zoom_out_factor))
+    
+    if face_centers.shape[0] > 1:
+        for _ in range(8):
+            new_w = max(1, int(w * zoom_out_factor))
+            new_h = max(1, int(h * zoom_out_factor))
+            x_off = (w - new_w) // 2
+            y_off = (h - new_h) // 2
 
-    for _ in range(8):
-        new_w = max(1, int(w * zoom_out_factor))
-        new_h = max(1, int(h * zoom_out_factor))
-        x_off = (w - new_w) // 2
-        y_off = (h - new_h) // 2
+            transformed = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
 
-        transformed = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
+            dists = np.linalg.norm(transformed - frame_center, axis=1)
+            max_after = float(np.max(dists))
 
-        dists = np.linalg.norm(transformed - frame_center, axis=1)
-        max_after = float(np.max(dists))
+            if max_after <= (radius_safe - containment_margin):
+                break
 
-        if max_after <= (radius_safe - containment_margin):
-            break
+            required_zoom = (radius_safe - containment_margin) / (max_after + 1e-6)
+            zoom_out_factor = float(max(min_zoom, min(zoom_out_factor * required_zoom * 0.98, zoom_out_factor * 0.995)))
+    
+    new_w = min(int(w * zoom_out_factor), w)
+    new_h = min(int(h * zoom_out_factor), h)
+    img_small = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    canvas = np.zeros((h, w, 3), dtype=np.uint8)
+    x_off = max((w - new_w) // 2, 0)
+    y_off = max((h - new_h) // 2, 0)
+    canvas[y_off:y_off + new_h, x_off:x_off + new_w] = img_small
+    img_bgr = canvas
 
-        required_zoom = (radius_safe - containment_margin) / (max_after + 1e-6)
-        zoom_out_factor = float(max(min_zoom, min(zoom_out_factor * required_zoom * 0.98, zoom_out_factor * 0.995)))
-
-    if zoom_out_factor < 1.0:
-        new_size = (max(1, int(w * zoom_out_factor)), max(1, int(h * zoom_out_factor)))
-        img_small = cv2.resize(img_bgr, new_size, interpolation=cv2.INTER_AREA)
-        canvas = np.zeros((h, w, 3), dtype=np.uint8)
-        x_off = (w - new_size[0]) // 2
-        y_off = (h - new_size[1]) // 2
-        canvas[y_off:y_off + new_size[1], x_off:x_off + new_size[0]] = img_small
-        img_bgr = canvas
-
-        face_centers = face_centers * zoom_out_factor + np.array([x_off, y_off], dtype=float)
-    else:
-        face_centers = face_centers.astype(float)
+    face_centers = face_centers * (new_w / w) + np.array([x_off, y_off], dtype=float)
 
     mean_face = np.mean(face_centers, axis=0)
 

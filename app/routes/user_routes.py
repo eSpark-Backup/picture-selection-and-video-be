@@ -3,23 +3,11 @@ import fastapi
 from sqlalchemy.orm import Session
 from app.database.connection import get_db
 from app.models.user import User
-from app.models.photo import Photo
-from app.services.s3_service import upload_to_s3
-from app.services.bg_removal import remove_background
-from app.services.fill_black_bg import fill_black_background
-from app.services.face_detection import detect_faces
 from app.background_tasks.tasks import process_photos_task
-from datetime import datetime
 from pydantic import BaseModel, EmailStr
-from PIL import Image
-import io
 from app.background_tasks.tasks import upload_original_photos_task
-from app.models.reviewer import Reviewer
 from app.models.original_photo import OriginalPhoto
-from fastapi.security import OAuth2PasswordRequestForm
-from passlib.context import CryptContext
-from app.background_tasks.tasks import send_photos_submission_email
-import jwt, os
+import os
 
 router = APIRouter(prefix="/api/v1/users", tags=["Users"])
 
