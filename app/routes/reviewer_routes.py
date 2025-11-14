@@ -208,6 +208,18 @@ async def create_video_for_user(
             status_code=400,
             detail="photo_ids must be provided as a non-empty list. Example: {\"photo_ids\": [1,2,3]}",
         )
+    
+    photos = db.query(Photo).filter(Photo.id.in_(photo_ids)).all()
+
+    if not photos:
+        raise HTTPException(status_code=404, detail="No photos found.")
+
+    invalid = [p.id for p in photos if p.status != "approved"]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"These photos are not approved: {invalid}"
+        )
 
     create_video_for_user_task.delay(photo_ids)
 
