@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from app.services.email_service import send_email
 
-# @celery_app.task(name="upload_original_photos_task")
 @celery_app.task(name="upload_original_photos_task", queue="photo_queue")
 def upload_original_photos_task(user_id, temp_dir, file_names):
     db = SessionLocal()
@@ -29,16 +28,12 @@ def upload_original_photos_task(user_id, temp_dir, file_names):
                 photos.append(OriginalPhoto(user_id=user_id, filename=filename, photo_url=s3_url))
         db.add_all(photos)
         db.commit()
-        from app.background_tasks.tasks import send_photos_submission_email
-        user = db.query(User).filter(User.id == user_id).first()
-        if user:
-            send_photos_submission_email.delay(user_email=user.email, user_name=user.first_name)
     finally:
         db.close()
         import shutil
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-# @celery_app.task(name="process_photos_task")
+
 @celery_app.task(name="process_photos_task", queue="photo_queue")
 def process_photos_task(user_id, photo_ids):
     from app.database.connection import SessionLocal
@@ -81,14 +76,9 @@ def process_photos_task(user_id, photo_ids):
             db.add(photo)
 
         db.commit()
-        from app.background_tasks.tasks import send_photos_submission_email
-        user = db.query(User).filter(User.id == user_id).first()
-        if user:
-            send_photos_submission_email.delay(user_email=user.email, user_name=user.first_name)
     finally:
         db.close()
-
-# @celery_app.task(name="create_video_for_user_task")        
+        
 @celery_app.task(name="create_video_for_user_task", queue="video_queue")
 def create_video_for_user_task(photo_ids):
     from app.database.connection import SessionLocal
@@ -149,14 +139,12 @@ def create_video_for_user_task(photo_ids):
         if 'video_path' in locals() and os.path.exists(video_path):
             os.remove(video_path)
 
-# @celery_app.task(name="send_photos_submission_email")
 @celery_app.task(name="send_photos_submission_email", queue="email_queue")
 def send_photos_submission_email(user_email, user_name):
     subject = "Your photos have been submitted!"
     body = f"Hi {user_name},\n\nYour photos have been submitted successfully. We will notify you once your video is ready.\n\nThank you!"
     send_email(user_email, subject, body)
 
-# @celery_app.task(name="send_video_ready_email")
 @celery_app.task(name="send_video_ready_email", queue="email_queue")
 def send_video_ready_email(user_email, user_name, video_link):
     subject = "Your video is ready!"
