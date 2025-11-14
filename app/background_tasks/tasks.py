@@ -128,8 +128,8 @@ def create_video_for_user_task(photo_ids):
         
 
         send_video_ready_email.delay(
-            user_email=user.email,
-            user_name=f"{user.first_name}",
+            user_email="james@showcaseholograms.com",
+            user_name="Reviewer",
             video_link=s3_url
         )
 
