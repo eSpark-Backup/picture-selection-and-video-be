@@ -11,6 +11,7 @@ hashed_password = pwd_context.hash("SecurePass123#")
 reviewer = Reviewer(
     username="reviewer",
     email="james@showcaseholograms.com",
+    # email="reviewer@hello.com",
     password=hashed_password
 )
 

@@ -59,9 +59,9 @@ def reviewer_login(
             "email": reviewer.email,
         },
     }
-    
+
 @router.get("/dashboard")
-def get_all_photos_with_users(
+def get_all_photos_grouped_by_user(
     db: Session = Depends(get_db),
     current_reviewer: Reviewer = Depends(get_current_reviewer),
     page: int = 1,
@@ -70,44 +70,48 @@ def get_all_photos_with_users(
     if page < 1 or limit < 1:
         raise HTTPException(status_code=400, detail="page and limit must be positive integers.")
 
-    total_photos = db.query(Photo).count()
-
-    photos = (
-        db.query(Photo)
-        .options(joinedload(Photo.user))
-        .order_by(Photo.created_at.desc())
+    total_users = db.query(User).count()
+    users = (
+        db.query(User)
+        .options(joinedload(User.photos))
+        .order_by(User.id.asc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
     )
-    
-    if not photos:
+
+    if not users:
         return {
             "success": True,
-            "message": "No photos found.",
+            "message": "No users found.",
             "page": page,
             "limit": limit,
-            "total_photos": 0,
+            "total_users": 0,
             "total_pages": 0,
             "data": [],
         }
 
     result = []
-    for photo in photos:
-        result.append({
-            "photo_id": photo.id,
-            "photo_url": photo.photo_url,
-            "filename": photo.filename,
-            "status": photo.status,
-            "created_at": photo.created_at,
-            "updated_at": photo.updated_at,
-            "user": {
-                "user_id": photo.user.id if photo.user else None,
-                "first_name": photo.user.first_name if photo.user else None,
-                "last_name": photo.user.last_name if photo.user else None,
-                "email": photo.user.email if photo.user else None,
-                "phone": photo.user.phone if photo.user else None,
+    for user in users:
+        user_photos = [
+            {
+                "photo_id": photo.id,
+                "photo_url": photo.photo_url,
+                "filename": photo.filename,
+                "status": photo.status,
+                "created_at": photo.created_at,
+                "updated_at": photo.updated_at
             }
+            for photo in user.photos
+        ]
+
+        result.append({
+            "user_id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone,
+            "photos": user_photos
         })
 
     return {
@@ -115,41 +119,76 @@ def get_all_photos_with_users(
         "message": "All user photos fetched successfully.",
         "page": page,
         "limit": limit,
-        "total_photos": total_photos,
-        "total_pages": (total_photos + limit - 1) // limit,
+        "total_users": total_users,
+        "total_photos": sum(len(user.photos) for user in users),
+        "total_pages": (total_users + limit - 1) // limit,
         "data": result,
     }
 
 @router.get("/videos", dependencies=[Depends(get_current_reviewer)])
-def get_all_videos(db: Session = Depends(get_db)):
-    videos = db.query(Video).order_by(Video.created_at.desc()).all()
-    if not videos:
+def get_all_videos_dashboard(
+    db: Session = Depends(get_db),
+    current_reviewer: Reviewer = Depends(get_current_reviewer),
+    page: int = 1,
+    limit: int = 10
+):
+    if page < 1 or limit < 1:
+        raise HTTPException(status_code=400, detail="page and limit must be positive integers.")
+
+    total_users = db.query(User).count()
+    users = (
+        db.query(User)
+        .options(joinedload(User.videos))
+        .order_by(User.id.asc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    if not users:
         return {
             "success": True,
-            "message": "No videos found.",
+            "message": "No users found.",
+            "page": page,
+            "limit": limit,
+            "total_users": 0,
             "total_videos": 0,
+            "total_pages": 0,
             "data": [],
         }
+
     result = []
-    for v in videos:
-        result.append({
-            "video_id": v.id,
-            "video_url": v.video_url,
-            "filename": v.filename,
-            "created_at": v.created_at,
-            "user": {
-                "user_id": v.user.id if v.user else None,
-                "first_name": v.user.first_name if v.user else None,
-                "last_name": v.user.last_name if v.user else None,
-                "email": v.user.email if v.user else None,
+    for user in users:
+        user_videos = [
+            {
+                "video_id": video.id,
+                "video_url": video.video_url,
+                "filename": video.filename,
+                "created_at": video.created_at,
             }
+            for video in user.videos
+        ]
+
+        result.append({
+            "user_id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone,
+            "videos": user_videos
         })
+
     return {
         "success": True,
-        "message": "All videos fetched successfully.",
-        "total_videos": len(result),
+        "message": "All user videos fetched successfully.",
+        "page": page,
+        "limit": limit,
+        "total_users": total_users,
+        "total_videos": sum(len(user.videos) for user in users),
+        "total_pages": (total_users + limit - 1) // limit,
         "data": result,
     }
+
 
 
 @router.get("/videos/{video_id}", dependencies=[Depends(get_current_reviewer)])
@@ -161,19 +200,24 @@ def get_video_by_id(video_id: int, db: Session = Depends(get_db)):
     return {
         "success": True,
         "message": "Video fetched successfully.",
-        "data": {
-            "video_id": video.id,
-            "video_url": video.video_url,
-            "filename": video.filename,
-            "created_at": video.created_at,
-            "user": {
+        "data": [
+            {
                 "user_id": video.user.id if video.user else None,
                 "first_name": video.user.first_name if video.user else None,
                 "last_name": video.user.last_name if video.user else None,
                 "email": video.user.email if video.user else None,
+                "videos": [
+                    {
+                        "video_id": video.id,
+                        "video_url": video.video_url,
+                        "filename": video.filename,
+                        "created_at": video.created_at
+                    }
+                ]
             }
-        }
+        ]
     }
+
 
 @router.delete("/videos/{video_id}", dependencies=[Depends(get_current_reviewer)])
 def delete_video_by_id(video_id: int, db: Session = Depends(get_db)):
@@ -214,14 +258,37 @@ async def create_video_for_user(
     if not photos:
         raise HTTPException(status_code=404, detail="No photos found.")
 
-    invalid = [p.id for p in photos if p.status != "approved"]
-    if invalid:
+    user_ids = {p.user_id for p in photos}
+    if len(user_ids) > 1:
         raise HTTPException(
             status_code=400,
-            detail=f"These photos are not approved: {invalid}"
+            detail="All photos must belong to the same user."
         )
 
-    create_video_for_user_task.delay(photo_ids)
+    # invalid = [p.id for p in photos if p.status != "approved"]
+    # if invalid:
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail=f"These photos are not approved: {invalid}"
+    #     )
+    
+    # create_video_for_user_task.delay(photo_ids)
+
+    pending = [p.id for p in photos if p.status == "pending"]
+    if pending:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot create video. These photos are pending: {pending}"
+        )
+    
+    approved_photos = [p.id for p in photos if p.status == "approved"]
+    if not approved_photos:
+        raise HTTPException(
+            status_code=400,
+            detail="No approved photos available to create video."
+        )
+    
+    create_video_for_user_task.delay(approved_photos)
 
     return {
         "success": True,
@@ -239,22 +306,27 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
     return {
         "success": True,
         "message": "Photo fetched successfully.",
-        "data": {
-            "photo_id": photo.id,
-            "photo_url": photo.photo_url,
-            "filename": photo.filename,
-            "status": photo.status,
-            "created_at": photo.created_at,
-            "updated_at": photo.updated_at,
-            "user": {
+        "data": [
+            {
                 "user_id": user.id,
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "email": user.email,
                 "phone": user.phone,
-            },
-        },
-    }
+                "photos": [
+                    {
+                        "photo_id": photo.id,
+                        "photo_url": photo.photo_url,
+                        "filename": photo.filename,
+                        "status": photo.status,
+                        "created_at": photo.created_at,
+                        "updated_at": photo.updated_at
+                    }
+                ]
+            }
+        ]
+}
+
 
 
 @router.put("/photos/{photo_id}")
@@ -318,13 +390,27 @@ async def edit_photo(
     return {
         "success": True,
         "message": "Photo replaced successfully.",
-        "data": {
-            "photo_id": photo.id,
-            "photo_url": photo.photo_url,
-            "filename": photo.filename,
-            "status": photo.status,
-        },
-    }    
+        "data": [
+            {
+                "user_id": user.id,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "email": user.email,
+                "phone": user.phone,
+                "photos": [
+                    {
+                        "photo_id": photo.id,
+                        "photo_url": photo.photo_url,
+                        "filename": photo.filename,
+                        "status": photo.status,
+                        "created_at": photo.created_at,
+                        "updated_at": photo.updated_at
+                    }
+                ]
+            }
+        ]
+    }
+    
 
 
 @router.put("/update-photo-status/{photo_id}")
@@ -344,12 +430,27 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
     return {
         "success": True,
         "message": f"Photo status updated to '{payload.status}' successfully.",
-        "data": {
-            "photo_id": photo.id,
-            "photo_url": photo.photo_url,
-            "status": photo.status,
-        },
-    }
+        "data": [
+            {
+                "user_id": photo.user.id if photo.user else None,
+                "first_name": photo.user.first_name if photo.user else None,
+                "last_name": photo.user.last_name if photo.user else None,
+                "email": photo.user.email if photo.user else None,
+                "phone": photo.user.phone if photo.user else None,
+                "photos": [
+                    {
+                        "photo_id": photo.id,
+                        "photo_url": photo.photo_url,
+                        "filename": photo.filename,
+                        "status": photo.status,
+                        "created_at": photo.created_at,
+                        "updated_at": photo.updated_at
+                    }
+                ]
+            }
+        ]
+}
+
     
 @router.delete("/photos/{photo_id}")
 def delete_photo(photo_id: int, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):

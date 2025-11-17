@@ -190,9 +190,9 @@ def delete_original_photo(photo_id: int, db: Session = Depends(get_db)):
 
 @router.post("/submit-form")
 def submit_user_form(payload: UserCreateRequest, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == payload.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already exists.")
+    # existing_user = db.query(User).filter(User.email == payload.email).first()
+    # if existing_user:
+    #     raise HTTPException(status_code=400, detail="Email already exists.")
 
     user = User(
         first_name=payload.first_name,
