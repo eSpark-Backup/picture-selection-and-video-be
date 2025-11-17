@@ -207,7 +207,7 @@ def submit_user_form(payload: UserCreateRequest, db: Session = Depends(get_db)):
     return {
         "success": True,
         "message": "User form submitted successfully.",
-        "data": {"user_id": user.id, "email": user.email, "phone": user.phone},
+        "data": {"user_id": user.id, "first_name": user.first_name, "last_name": user.last_name, "email": user.email, "phone": user.phone, "created_at": user.created_at, "updated_at": user.updated_at},
     }
 
 @router.post("/submit-processed-photos/{user_id}")
