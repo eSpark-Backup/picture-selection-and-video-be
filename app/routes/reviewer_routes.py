@@ -57,6 +57,8 @@ def reviewer_login(
         "reviewer": {
             "username": reviewer.username,
             "email": reviewer.email,
+            "created_at": reviewer.created_at,
+            "updated_at": reviewer.updated_at,
         },
     }
 
@@ -167,6 +169,7 @@ def get_all_videos_dashboard(
                 "video_url": video.video_url,
                 "filename": video.filename,
                 "created_at": video.created_at,
+                "updated_at": video.updated_at
             }
             for video in user.videos
         ]
@@ -177,6 +180,8 @@ def get_all_videos_dashboard(
             "last_name": user.last_name,
             "email": user.email,
             "phone": user.phone,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
             "videos": user_videos
         })
 
@@ -208,12 +213,16 @@ def get_video_by_id(video_id: int, db: Session = Depends(get_db)):
                 "first_name": video.user.first_name if video.user else None,
                 "last_name": video.user.last_name if video.user else None,
                 "email": video.user.email if video.user else None,
+                "phone": video.user.phone if video.user else None,
+                "created_at": video.user.created_at if video.user else None,
+                "updated_at": video.user.updated_at if video.user else None,
                 "videos": [
                     {
                         "video_id": video.id,
                         "video_url": video.video_url,
                         "filename": video.filename,
-                        "created_at": video.created_at
+                        "created_at": video.created_at,
+                        "updated_at": video.updated_at
                     }
                 ]
             }
@@ -315,6 +324,8 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
                 "last_name": user.last_name,
                 "email": user.email,
                 "phone": user.phone,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
                 "photos": [
                     {
                         "photo_id": photo.id,
@@ -399,6 +410,8 @@ async def edit_photo(
                 "last_name": user.last_name,
                 "email": user.email,
                 "phone": user.phone,
+                "created_at": user.created_at,
+                "updated_at": user.updated_at,
                 "photos": [
                     {
                         "photo_id": photo.id,
@@ -439,6 +452,8 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
                 "last_name": photo.user.last_name if photo.user else None,
                 "email": photo.user.email if photo.user else None,
                 "phone": photo.user.phone if photo.user else None,
+                "created_at": photo.user.created_at if photo.user else None,
+                "updated_at": photo.user.updated_at if photo.user else None,
                 "photos": [
                     {
                         "photo_id": photo.id,

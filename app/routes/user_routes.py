@@ -75,6 +75,7 @@ def get_all_original_photos(user_id: int, db: Session = Depends(get_db)):
                 "photo_url": p.photo_url,
                 "filename": p.filename,
                 "created_at": p.created_at,
+                "updated_at": p.updated_at,
             }
             for p in photos
         ],
@@ -93,6 +94,7 @@ def get_original_photo_by_id(photo_id: int, db: Session = Depends(get_db)):
             "photo_url": photo.photo_url,
             "filename": photo.filename,
             "created_at": photo.created_at,
+            "updated_at": photo.updated_at,
         },
     }
 
@@ -237,5 +239,3 @@ async def submit_processed_photos(
         "success": True,
         "message": "Your photos are being processed in the background. You’ll be notified once it’s done.",
     }
-
-    
