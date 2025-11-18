@@ -111,6 +111,8 @@ def get_all_photos_grouped_by_user(
             "last_name": user.last_name,
             "email": user.email,
             "phone": user.phone,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
             "photos": user_photos
         })
 
