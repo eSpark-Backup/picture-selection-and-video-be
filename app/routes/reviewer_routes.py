@@ -55,6 +55,7 @@ def reviewer_login(
         "access_token": token,
         "token_type": "bearer",
         "reviewer": {
+            "reviewer_id": reviewer.id,
             "username": reviewer.username,
             "email": reviewer.email,
             "created_at": reviewer.created_at,

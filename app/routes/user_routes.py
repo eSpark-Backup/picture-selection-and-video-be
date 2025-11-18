@@ -72,6 +72,7 @@ def get_all_original_photos(user_id: int, db: Session = Depends(get_db)):
         "data": [
             {
                 "photo_id": p.id,
+                "user_id": p.user_id,
                 "photo_url": p.photo_url,
                 "filename": p.filename,
                 "created_at": p.created_at,
@@ -91,6 +92,7 @@ def get_original_photo_by_id(photo_id: int, db: Session = Depends(get_db)):
         "success": True,
         "data": {
             "photo_id": photo.id,
+            "user_id": photo.user_id,
             "photo_url": photo.photo_url,
             "filename": photo.filename,
             "created_at": photo.created_at,
@@ -169,8 +171,10 @@ async def replace_original_photo(
         "message": "Original photo replaced successfully.",
         "data": {
             "photo_id": photo.id,
+            "user_id": photo.user_id,
             "photo_url": photo.photo_url,
             "filename": photo.filename,
+            "created_at": photo.created_at,
             "updated_at": photo.updated_at,
         },
     }
