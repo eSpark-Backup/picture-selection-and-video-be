@@ -103,14 +103,19 @@ def upload_to_s3(file: UploadFile | Any, filename: str) -> str:
                 Config=transfer_config,
             )
 
-        presigned_url = _s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": BUCKET_NAME, "Key": filename},
-            ExpiresIn=7 * 24 * 60 * 60,  # 7 days
-        )
+        # presigned_url = _s3_client.generate_presigned_url(
+        #     "get_object",
+        #     Params={"Bucket": BUCKET_NAME, "Key": filename},
+        #     ExpiresIn=7 * 24 * 60 * 60,  # 7 days
+        # )
+
+        # logger.info(f"S3 upload success: {filename} ({file_size or 'unknown'} bytes)")
+        # return presigned_url
+        
+        object_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{filename}"
 
         logger.info(f"S3 upload success: {filename} ({file_size or 'unknown'} bytes)")
-        return presigned_url
+        return object_url
 
     except (BotoCoreError, ClientError) as e:
         logger.error(f"S3 upload failed for {filename}: {e}")

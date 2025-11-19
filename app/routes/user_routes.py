@@ -49,12 +49,41 @@ async def upload_original_photos(
         with open(os.path.join(temp_dir, f.filename), "wb") as buffer:
             buffer.write(file_content)
 
-    upload_original_photos_task.delay(user_id, temp_dir, file_names)
+    # upload_original_photos_task.delay(user_id, temp_dir, file_names)
+
+    # return {
+    #     "success": True,
+    #     "message": "Your photos are being uploaded and processed in the background. You’ll be notified once complete.",
+    # }
+    
+    upload_original_photos_task(user_id, temp_dir, file_names)
+
+    # return {
+    #     "success": True,
+    #     "message": "Your photos have been uploaded successfully.",
+    # }
+    
+    photos = db.query(OriginalPhoto).filter(OriginalPhoto.user_id == user.id).order_by(OriginalPhoto.id).all()
+
+    response_photos = [
+        {
+            "photo_id": photo.id,
+            "user_id": photo.user_id,
+            "photo_url": photo.photo_url,
+            "filename": photo.filename,
+            "created_at": photo.created_at,
+            "updated_at": photo.updated_at
+        }
+        for photo in photos
+    ]
 
     return {
         "success": True,
-        "message": "Your photos are being uploaded and processed in the background. You’ll be notified once complete.",
+        "total": len(response_photos),
+        "data": response_photos
     }
+
+
 
 @router.get("/original-photos/{user_id}")
 def get_all_original_photos(user_id: int, db: Session = Depends(get_db)):
