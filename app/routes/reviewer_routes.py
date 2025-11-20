@@ -207,27 +207,16 @@ def get_video_by_id(video_id: int, db: Session = Depends(get_db)):
     return {
         "success": True,
         "message": "Video fetched successfully.",
-        "data": [
-            {
-                "user_id": video.user.id if video.user else None,
-                "first_name": video.user.first_name if video.user else None,
-                "last_name": video.user.last_name if video.user else None,
-                "email": video.user.email if video.user else None,
-                "phone": video.user.phone if video.user else None,
-                "created_at": video.user.created_at if video.user else None,
-                "updated_at": video.user.updated_at if video.user else None,
-                "videos": [
-                    {
-                        "video_id": video.id,
-                        "video_url": video.video_url,
-                        "filename": video.filename,
-                        "created_at": video.created_at,
-                        "updated_at": video.updated_at
-                    }
-                ]
-            }
-        ]
+        "data": {
+            "video_id": video.id,
+            "video_url": video.video_url,
+            "filename": video.filename,
+            "user_id": video.user_id,
+            "created_at": video.created_at,
+            "updated_at": video.updated_at
+        }
     }
+
 
 
 @router.delete("/videos/{video_id}", dependencies=[Depends(get_current_reviewer)])
@@ -311,37 +300,21 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
     photo = db.query(Photo).filter(Photo.id == photo_id).first()
     if not photo:
         raise HTTPException(status_code=404, detail="Photo not found.")
-    
-    user = db.query(User).filter(User.id == photo.user_id).first()
-    
-    user_photos = [
-        {
-            "photo_id": p.id,
-            "photo_url": p.photo_url,
-            "filename": p.filename,
-            "status": p.status,
-            "created_at": p.created_at,
-            "updated_at": p.updated_at
-        }
-        for p in sorted(user.photos, key=lambda p: p.created_at, reverse=True)
-    ]
 
     return {
         "success": True,
         "message": "Photo fetched successfully.",
-        "data": [
-            {
-                "user_id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "email": user.email,
-                "phone": user.phone,
-                "created_at": user.created_at,
-                "updated_at": user.updated_at,
-                "photos": user_photos
-            }
-        ]
+        "data": {
+            "photo_id": photo.id,
+            "photo_url": photo.photo_url,
+            "filename": photo.filename,
+            "status": photo.status,
+            "user_id": photo.user_id,
+            "created_at": photo.created_at,
+            "updated_at": photo.updated_at
+        }
     }
+
 
 
 
@@ -405,28 +378,16 @@ async def edit_photo(
 
     return {
         "success": True,
-        "message": "Photo replaced successfully.",
-        "data": [
-            {
-                "user_id": user.id,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "email": user.email,
-                "phone": user.phone,
-                "created_at": user.created_at,
-                "updated_at": user.updated_at,
-                "photos": [
-                    {
-                        "photo_id": photo.id,
-                        "photo_url": photo.photo_url,
-                        "filename": photo.filename,
-                        "status": photo.status,
-                        "created_at": photo.created_at,
-                        "updated_at": photo.updated_at
-                    }
-                ]
-            }
-        ]
+        "message": "Photo updated successfully.",
+        "data": {
+            "photo_id": photo.id,
+            "photo_url": photo.photo_url,
+            "filename": photo.filename,
+            "status": photo.status,
+            "user_id": photo.user_id,
+            "created_at": photo.created_at,
+            "updated_at": photo.updated_at
+        }
     }
     
 
@@ -458,21 +419,19 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
     ]
 
     return {
-        "success": True,
-        "message": f"Photo status updated to '{payload.status}' successfully.",
-        "data": [
-            {
-                "user_id": photo.user.id if photo.user else None,
-                "first_name": photo.user.first_name if photo.user else None,
-                "last_name": photo.user.last_name if photo.user else None,
-                "email": photo.user.email if photo.user else None,
-                "phone": photo.user.phone if photo.user else None,
-                "created_at": photo.user.created_at if photo.user else None,
-                "updated_at": photo.user.updated_at if photo.user else None,
-                "photos": user_photos
-            }
-        ]
+    "success": True,
+    "message": f"Photo status updated to '{payload.status}' successfully.",
+    "data": {
+        "photo_id": photo.id,
+        "photo_url": photo.photo_url,
+        "filename": photo.filename,
+        "status": photo.status,
+        "user_id": photo.user_id,
+        "created_at": photo.created_at,
+        "updated_at": photo.updated_at
+    }
 }
+
 
     
 @router.delete("/photos/{photo_id}")
