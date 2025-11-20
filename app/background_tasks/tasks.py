@@ -34,33 +34,77 @@ def upload_original_photos_task(user_id, temp_dir, file_names):
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# @celery_app.task(name="process_photos_task", queue="photo_queue")
+# def process_photos_task(user_id, photo_ids):
+#     from app.database.connection import SessionLocal
+#     from app.models.original_photo import OriginalPhoto
+#     from app.models.photo import Photo
+#     from app.services.bg_removal import remove_background
+#     from app.services.fill_black_bg import fill_black_background
+#     from app.services.face_detection import detect_faces
+#     from app.services.s3_service import upload_to_s3, s3, BUCKET_NAME
+#     import requests, io
+#     from datetime import datetime
+#     from uuid import uuid4
+
+#     db = SessionLocal()
+#     try:
+#         originals = db.query(OriginalPhoto).filter(
+#             OriginalPhoto.user_id == user_id,
+#             OriginalPhoto.id.in_(photo_ids)
+#         ).all()
+
+#         for orig in originals:
+#             presigned = s3.generate_presigned_url(
+#                 "get_object",
+#                 Params={"Bucket": BUCKET_NAME, "Key": orig.filename},
+#                 ExpiresIn=300,
+#             )
+#             img_bytes = requests.get(presigned, timeout=20).content
+#             processed = detect_faces(fill_black_background(remove_background(img_bytes)))
+
+#             class TempUploadFile:
+#                 def __init__(self, buf):
+#                     self.file = io.BytesIO(buf)
+#                     self.content_type = "image/jpeg"
+
+#             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+#             user = db.query(User).filter(User.id == user_id).first()
+#             filename = f"{user.last_name.lower()}_{user.first_name.lower()}_{timestamp}.jpg"
+#             s3_url = upload_to_s3(TempUploadFile(processed), filename)
+#             photo = Photo(user_id=user_id, filename=filename, photo_url=s3_url)
+#             db.add(photo)
+
+#         db.commit()
+#     finally:
+#         db.close()
+
 @celery_app.task(name="process_photos_task", queue="photo_queue")
-def process_photos_task(user_id, photo_ids):
+def process_photos_task(user_id, temp_dir, file_names):
     from app.database.connection import SessionLocal
-    from app.models.original_photo import OriginalPhoto
     from app.models.photo import Photo
+    from app.models.user import User
     from app.services.bg_removal import remove_background
     from app.services.fill_black_bg import fill_black_background
     from app.services.face_detection import detect_faces
-    from app.services.s3_service import upload_to_s3, s3, BUCKET_NAME
-    import requests, io
-    from datetime import datetime
+    from app.services.s3_service import upload_to_s3
+    import io
+    from datetime import datetime, timezone
     from uuid import uuid4
+    import os
+    import shutil
 
     db = SessionLocal()
     try:
-        originals = db.query(OriginalPhoto).filter(
-            OriginalPhoto.user_id == user_id,
-            OriginalPhoto.id.in_(photo_ids)
-        ).all()
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return "User not found"
 
-        for orig in originals:
-            presigned = s3.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": BUCKET_NAME, "Key": orig.filename},
-                ExpiresIn=300,
-            )
-            img_bytes = requests.get(presigned, timeout=20).content
+        for fname in file_names:
+            file_path = os.path.join(temp_dir, fname)
+            with open(file_path, "rb") as f:
+                img_bytes = f.read()
+
             processed = detect_faces(fill_black_background(remove_background(img_bytes)))
 
             class TempUploadFile:
@@ -69,15 +113,17 @@ def process_photos_task(user_id, photo_ids):
                     self.content_type = "image/jpeg"
 
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
-            user = db.query(User).filter(User.id == user_id).first()
             filename = f"{user.last_name.lower()}_{user.first_name.lower()}_{timestamp}.jpg"
             s3_url = upload_to_s3(TempUploadFile(processed), filename)
+
             photo = Photo(user_id=user_id, filename=filename, photo_url=s3_url)
             db.add(photo)
 
         db.commit()
     finally:
         db.close()
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
         
 @celery_app.task(name="create_video_for_user_task", queue="video_queue")
 def create_video_for_user_task(photo_ids):

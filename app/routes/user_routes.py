@@ -250,30 +250,69 @@ def submit_user_form(payload: UserCreateRequest, db: Session = Depends(get_db)):
         "data": {"user_id": user.id, "first_name": user.first_name, "last_name": user.last_name, "email": user.email, "phone": user.phone, "created_at": user.created_at, "updated_at": user.updated_at},
     }
 
+# @router.post("/submit-processed-photos/{user_id}")
+# async def submit_processed_photos(
+#     user_id: int,
+#     request: fastapi.Request,
+#     db: Session = Depends(get_db),
+# ):
+#     try:
+#         body = await request.json()
+#         photo_ids = body.get("photo_ids")
+#     except Exception:
+#         raise HTTPException(status_code=400, detail="Invalid JSON body.")
+
+#     if not photo_ids or not isinstance(photo_ids, list) or len(photo_ids) == 0:
+#         raise HTTPException(status_code=400, detail="photo_ids must be a non-empty list.")
+#     if len(photo_ids) > 30:
+#         raise HTTPException(status_code=400, detail="You can submit up to 30 photos only.")
+
+#     user = db.query(User).filter(User.id == user_id).first()
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found.")
+
+#     process_photos_task.delay(user_id, photo_ids)
+
+#     return {
+#         "success": True,
+#         "message": "Your photos are being processed in the background. You’ll be notified once it’s done.",
+#     }
+
 @router.post("/submit-processed-photos/{user_id}")
 async def submit_processed_photos(
     user_id: int,
-    request: fastapi.Request,
+    files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    try:
-        body = await request.json()
-        photo_ids = body.get("photo_ids")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body.")
-
-    if not photo_ids or not isinstance(photo_ids, list) or len(photo_ids) == 0:
-        raise HTTPException(status_code=400, detail="photo_ids must be a non-empty list.")
-    if len(photo_ids) > 30:
+    if not files:
+        raise HTTPException(status_code=400, detail="No files provided.")
+    if len(files) > 30:
         raise HTTPException(status_code=400, detail="You can submit up to 30 photos only.")
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    process_photos_task.delay(user_id, photo_ids)
+    temp_dir = f"/tmp/uploads_user_{user_id}"
+    os.makedirs(temp_dir, exist_ok=True)
+    file_names = []
+
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    for f in files:
+        content = await f.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File '{f.filename}' exceeds the 5 MB size limit."
+            )
+        file_path = os.path.join(temp_dir, f.filename)
+        with open(file_path, "wb") as fp:
+            fp.write(content)
+        file_names.append(f.filename)
+
+    process_photos_task.delay(user_id, temp_dir, file_names)
 
     return {
         "success": True,
-        "message": "Your photos are being processed in the background. You’ll be notified once it’s done.",
+        "message": "Your photos are being processed in the background. You’ll be notified once it’s done."
     }
