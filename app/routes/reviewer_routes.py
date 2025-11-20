@@ -77,7 +77,7 @@ def get_all_photos_grouped_by_user(
     users = (
         db.query(User)
         .options(joinedload(User.photos))
-        .order_by(User.id.asc())
+        .order_by(User.created_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -105,9 +105,8 @@ def get_all_photos_grouped_by_user(
                 "created_at": photo.created_at,
                 "updated_at": photo.updated_at
             }
-            for photo in user.photos
+            for photo in sorted(user.photos, key=lambda p: p.created_at, reverse=True)
         ]
-
         result.append({
             "user_id": user.id,
             "first_name": user.first_name,
@@ -144,7 +143,7 @@ def get_all_videos_dashboard(
     users = (
         db.query(User)
         .options(joinedload(User.videos))
-        .order_by(User.id.asc())
+        .order_by(User.created_at.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()
@@ -172,7 +171,7 @@ def get_all_videos_dashboard(
                 "created_at": video.created_at,
                 "updated_at": video.updated_at
             }
-            for video in user.videos
+            for video in sorted(user.videos, key=lambda v: v.created_at, reverse=True)
         ]
 
         result.append({
@@ -314,6 +313,18 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
         raise HTTPException(status_code=404, detail="Photo not found.")
     
     user = db.query(User).filter(User.id == photo.user_id).first()
+    
+    user_photos = [
+        {
+            "photo_id": p.id,
+            "photo_url": p.photo_url,
+            "filename": p.filename,
+            "status": p.status,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at
+        }
+        for p in sorted(user.photos, key=lambda p: p.created_at, reverse=True)
+    ]
 
     return {
         "success": True,
@@ -327,19 +338,10 @@ def get_photo_by_id(photo_id: int, db: Session = Depends(get_db), current_review
                 "phone": user.phone,
                 "created_at": user.created_at,
                 "updated_at": user.updated_at,
-                "photos": [
-                    {
-                        "photo_id": photo.id,
-                        "photo_url": photo.photo_url,
-                        "filename": photo.filename,
-                        "status": photo.status,
-                        "created_at": photo.created_at,
-                        "updated_at": photo.updated_at
-                    }
-                ]
+                "photos": user_photos
             }
         ]
-}
+    }
 
 
 
@@ -442,6 +444,18 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
     photo.status = payload.status
     db.commit()
     db.refresh(photo)
+    
+    user_photos = [
+        {
+            "photo_id": p.id,
+            "photo_url": p.photo_url,
+            "filename": p.filename,
+            "status": p.status,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at
+        }
+        for p in sorted(photo.user.photos, key=lambda p: p.created_at, reverse=True)
+    ]
 
     return {
         "success": True,
@@ -455,16 +469,7 @@ def update_photo_status(photo_id: int, payload: PhotoStatusUpdate, db: Session =
                 "phone": photo.user.phone if photo.user else None,
                 "created_at": photo.user.created_at if photo.user else None,
                 "updated_at": photo.user.updated_at if photo.user else None,
-                "photos": [
-                    {
-                        "photo_id": photo.id,
-                        "photo_url": photo.photo_url,
-                        "filename": photo.filename,
-                        "status": photo.status,
-                        "created_at": photo.created_at,
-                        "updated_at": photo.updated_at
-                    }
-                ]
+                "photos": user_photos
             }
         ]
 }

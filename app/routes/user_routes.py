@@ -63,7 +63,7 @@ async def upload_original_photos(
     #     "message": "Your photos have been uploaded successfully.",
     # }
     
-    photos = db.query(OriginalPhoto).filter(OriginalPhoto.user_id == user.id).order_by(OriginalPhoto.id).all()
+    photos = db.query(OriginalPhoto).filter(OriginalPhoto.user_id == user.id).order_by(OriginalPhoto.id.desc()).all()
 
     response_photos = [
         {
@@ -87,7 +87,12 @@ async def upload_original_photos(
 
 @router.get("/original-photos/{user_id}")
 def get_all_original_photos(user_id: int, db: Session = Depends(get_db)):
-    photos = db.query(OriginalPhoto).filter(OriginalPhoto.user_id == user_id).all()
+    photos = (
+        db.query(OriginalPhoto)
+        .filter(OriginalPhoto.user_id == user_id)
+        .order_by(OriginalPhoto.id.desc())
+        .all()
+    )
     if not photos:
         return {
             "success": True,
