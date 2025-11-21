@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 import uuid
 from fastapi import APIRouter, HTTPException, Depends
@@ -389,7 +390,35 @@ async def edit_photo(
             "updated_at": photo.updated_at
         }
     }
-    
+
+def fetch_image(url: str):
+    try:
+        r = requests.get(url)
+        r.raise_for_status()
+        base64_data = base64.b64encode(r.content).decode("utf-8")
+        return {
+            "image": base64_data,
+            "mime_type": r.headers.get("Content-Type", "image/jpeg")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch image: {e}")
+
+@router.get("/photos/base64/{photo_id}")
+def get_photo_base64(photo_id: int, db: Session = Depends(get_db), current_reviewer: Reviewer = Depends(get_current_reviewer)):
+    photo = db.query(Photo).filter(Photo.id == photo_id).first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+
+    if not photo.photo_url:
+        raise HTTPException(status_code=404, detail="Photo URL not found.")
+
+    image_data = fetch_image(photo.photo_url)
+
+    return {
+        "success": True,
+        "message": "Photo fetched successfully as base64.",
+        "data": image_data
+    }
 
 
 @router.put("/update-photo-status/{photo_id}")
