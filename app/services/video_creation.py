@@ -18,7 +18,7 @@ MAX_WORK_RESOLUTION = (1920, 1080)
 def resize_image(image, max_size=MAX_RESOLUTION):
     h, w = image.shape[:2]
     max_w, max_h = max_size
-    scale = min(max_w / w, max_h / h, 1.0)
+    scale = min(max_w / w, max_h / h)
     new_w, new_h = int(w * scale), int(h * scale)
     resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_AREA)
     canvas = np.zeros((max_h, max_w, 3), dtype=np.uint8)
