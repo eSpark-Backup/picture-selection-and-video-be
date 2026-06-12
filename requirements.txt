@@ -102,7 +102,7 @@ SQLAlchemy==2.0.44
 starlette==0.48.0
 sympy==1.14.0
 tifffile==2025.10.4
-tornado==6.5.2
+tornado==6.5.6
 tqdm==4.67.1
 typing-inspection==0.4.2
 typing_extensions==4.15.0
