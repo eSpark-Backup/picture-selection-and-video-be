@@ -78,7 +78,7 @@ psycopg2-binary==2.9.11
 pycparser==2.23
 pydantic==2.11.10
 pydantic_core==2.33.2
-PyJWT==2.10.1
+PyJWT==2.13.0
 PyMatting==1.1.14
 pyparsing==3.2.5
 pyreadline3==3.5.4
