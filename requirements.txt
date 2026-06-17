@@ -29,7 +29,7 @@ email-validator==2.3.0
 fastapi==0.118.0
 flatbuffers==25.9.23
 flower==2.0.1
-fonttools==4.60.1
+fonttools==4.60.2
 frozenlist==1.8.0
 greenlet==3.2.4
 h11==0.16.0
