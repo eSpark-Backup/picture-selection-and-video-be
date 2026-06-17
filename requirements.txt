@@ -89,7 +89,7 @@ pytz==2025.2
 PyYAML==6.0.3
 redis==5.2.1
 referencing==0.36.2
-rembg==2.0.67
+rembg==2.0.75
 requests==2.32.5
 rpds-py==0.27.1
 s3transfer==0.14.0
